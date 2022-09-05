@@ -3,7 +3,11 @@ use itertools::Itertools;
 use wgpu::util::DeviceExt;
 use winit::{event::Event, window::Window};
 
-use crate::{resources::{Instance, InstanceRaw, Texture, Vertex}, camera::{PerspectiveCamera, Camera}, controller::Controller};
+use crate::{
+    camera::{Camera, PerspectiveCamera},
+    controller::Controller,
+    resources::{Instance, InstanceRaw, Texture, Vertex},
+};
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
 const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
@@ -46,6 +50,8 @@ pub struct Renderer {
     instance_buffer: wgpu::Buffer,
     camera_buffer: wgpu::Buffer,
 
+    depth_texture: Texture,
+
     diffuse_bind_group: wgpu::BindGroup,
     camera_bind_group: wgpu::BindGroup,
 
@@ -53,7 +59,7 @@ pub struct Renderer {
 
     pub size: winit::dpi::PhysicalSize<u32>,
     pub instances: Vec<Instance>,
-    pub camera: PerspectiveCamera
+    pub camera: PerspectiveCamera,
 }
 
 impl Renderer {
@@ -123,10 +129,12 @@ impl Renderer {
         // Create camera
         let camera = PerspectiveCamera::new(config.width as f32 / config.height as f32, 10.0);
 
-        // Create texture
+        // Create textures
         let diffuse_bytes = include_bytes!("happy-tree.png");
         let diffuse_texture = Texture::from_bytes(&device, &queue, diffuse_bytes, "Happy-Tree")
             .expect("Failed to create texture");
+
+        let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
         // Create buffers
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -188,9 +196,9 @@ impl Renderer {
             label: Some("diffuse_bind_group"),
         });
 
-        let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
@@ -199,18 +207,15 @@ impl Renderer {
                         min_binding_size: None,
                     },
                     count: None,
-                }
-            ],
-            label: Some("camera_bind_group_layout"),
-        });
+                }],
+                label: Some("camera_bind_group_layout"),
+            });
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &camera_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                }
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
             label: Some("camera_bind_group"),
         });
 
@@ -252,7 +257,13 @@ impl Renderer {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -266,6 +277,7 @@ impl Renderer {
             config,
             device,
             queue,
+            depth_texture,
             vertex_buffer,
             index_buffer,
             instance_buffer,
@@ -285,6 +297,8 @@ impl Renderer {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            self.depth_texture =
+                Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
     }
 
@@ -295,7 +309,11 @@ impl Renderer {
 
     pub fn update(&mut self, dt: std::time::Duration) {
         self.camera.update(dt);
-        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera.view_proj()]))
+        self.queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            bytemuck::cast_slice(&[self.camera.view_proj()]),
+        )
     }
 
     pub fn render(&self) -> Result<(), wgpu::SurfaceError> {
@@ -325,7 +343,14 @@ impl Renderer {
                         store: true,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: true,
+                    }),
+                    stencil_ops: None,
+                }),
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
