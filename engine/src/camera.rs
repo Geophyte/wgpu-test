@@ -37,7 +37,7 @@ pub struct PerspectiveCamera {
 impl PerspectiveCamera {
     pub fn new(aspect: f32, speed: f32) -> Self {
         return Self {
-            eye: (0.0, 1.0, 2.0).into(),
+            eye: (0.0, 5.0, 10.0).into(),
             target: (0.0, 0.0, 0.0).into(),
             up: cgmath::Vector3::unit_y(),
             aspect,
@@ -80,6 +80,10 @@ impl Controller for PerspectiveCamera {
                     }
                     VirtualKeyCode::D | VirtualKeyCode::Right => {
                         self.is_right_pressed = is_pressed;
+                    },
+                    
+                    VirtualKeyCode::R => {
+                        self.eye = (0.0, 5.0, 10.0).into();
                     }
                     VirtualKeyCode::Space => {
                         self.is_up_pressed = is_pressed;
@@ -128,5 +132,7 @@ impl Controller for PerspectiveCamera {
         if self.is_down_pressed {
             self.eye = self.target - (forward - up * self.speed * dt).normalize() * forward_mag;
         }
+
+        //self.speed = 2.0 * core::f32::consts::PI * (self.target - self.eye).magnitude() * 0.5;
     }
 }
