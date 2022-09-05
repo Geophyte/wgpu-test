@@ -2,10 +2,20 @@ use winit::event::{ElementState, VirtualKeyCode};
 
 use crate::controller::{Controller, ControllerEvent};
 
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CameraUniform {
+    view_position: [f32; 4],
+    view_proj: [[f32; 4]; 4],
+}
+
 pub trait Camera {
     fn view_projection_matrix(&self) -> cgmath::Matrix4<f32>;
-    fn view_proj(&self) -> [[f32; 4]; 4] {
-        return self.view_projection_matrix().into();
+    fn view_proj(&self) -> CameraUniform {
+        return CameraUniform {
+            view_position: [0.0; 4],
+            view_proj: self.view_projection_matrix().into(),
+        };
     }
 }
 
@@ -61,6 +71,13 @@ impl Camera for PerspectiveCamera {
         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
         return OPENGL_TO_WGPU_MATRIX * proj * view;
     }
+
+    fn view_proj(&self) -> CameraUniform {
+        return CameraUniform {
+            view_position: self.eye.to_homogeneous().into(),
+            view_proj: (OPENGL_TO_WGPU_MATRIX * self.view_projection_matrix()).into(),
+        };
+    }
 }
 
 impl Controller for PerspectiveCamera {
@@ -80,8 +97,8 @@ impl Controller for PerspectiveCamera {
                     }
                     VirtualKeyCode::D | VirtualKeyCode::Right => {
                         self.is_right_pressed = is_pressed;
-                    },
-                    
+                    }
+
                     VirtualKeyCode::R => {
                         self.eye = (0.0, 5.0, 10.0).into();
                     }
