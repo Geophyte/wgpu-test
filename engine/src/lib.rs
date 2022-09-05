@@ -1,4 +1,6 @@
 mod renderer;
+mod resources;
+mod controller;
 
 use renderer::Renderer;
 use winit::{
@@ -17,11 +19,12 @@ pub async fn run() {
 
     let mut renderer = Renderer::new(&window).await;
 
+    let mut last_render_time = std::time::Instant::now();
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
-        match event {
-            Event::WindowEvent { window_id, event } if window_id == window.id() => {
-                if !renderer.input(&event) {
+        if !renderer.input(&event) {
+            match event {
+                Event::WindowEvent { window_id, event } if window_id == window.id() => {
                     match event {
                         WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                         WindowEvent::Resized(physical_size) => renderer.resize(physical_size),
@@ -31,18 +34,21 @@ pub async fn run() {
                         _ => {}
                     }
                 }
-            }
-            Event::RedrawRequested(window_id) if window_id == window.id() => {
-                renderer.update();
-                match renderer.render() {
-                    Ok(_) => {}
-                    Err(wgpu::SurfaceError::Lost) => renderer.resize(renderer.size),
-                    Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                    Err(e) => eprintln!("{:?}", e),
+                Event::RedrawRequested(window_id) if window_id == window.id() => {
+                    let now = std::time::Instant::now();
+                    let dt = now - last_render_time;
+                    last_render_time = now;
+                    renderer.update(dt);
+                    match renderer.render() {
+                        Ok(_) => {}
+                        Err(wgpu::SurfaceError::Lost) => renderer.resize(renderer.size),
+                        Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
+                        Err(e) => eprintln!("{:?}", e),
+                    }
                 }
+                Event::MainEventsCleared => window.request_redraw(),
+                _ => {}
             }
-            Event::MainEventsCleared => window.request_redraw(),
-            _ => {}
         }
     });
 }
