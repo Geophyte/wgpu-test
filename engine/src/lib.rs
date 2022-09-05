@@ -1,10 +1,13 @@
+mod camera;
+mod controller;
 mod renderer;
 mod resources;
-mod controller;
 
+use controller::{Controller, ControllerEvent};
 use renderer::Renderer;
 use winit::{
-    event::{Event, WindowEvent},
+    dpi::PhysicalPosition,
+    event::{DeviceEvent, Event, KeyboardInput, MouseScrollDelta, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
@@ -24,12 +27,43 @@ pub async fn run() {
         *control_flow = ControlFlow::Poll;
         if !renderer.input(&event) {
             match event {
+                Event::DeviceEvent { event, .. } => match event {
+                    DeviceEvent::MouseMotion { delta } => {
+                        renderer.camera.input(ControllerEvent::MouseMove(delta))
+                    }
+                    _ => {}
+                },
                 Event::WindowEvent { window_id, event } if window_id == window.id() => {
                     match event {
                         WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                         WindowEvent::Resized(physical_size) => renderer.resize(physical_size),
                         WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
                             renderer.resize(*new_inner_size)
+                        }
+                        WindowEvent::KeyboardInput {
+                            input:
+                                KeyboardInput {
+                                    state,
+                                    virtual_keycode: Some(key),
+                                    ..
+                                },
+                            ..
+                        } => renderer
+                            .camera
+                            .input(ControllerEvent::KeyboardInput(state, key)),
+                        WindowEvent::MouseInput { state, button, .. } => renderer
+                            .camera
+                            .input(ControllerEvent::MouseInput(state, button)),
+                        WindowEvent::MouseWheel { delta, .. } => {
+                            renderer
+                                .camera
+                                .input(ControllerEvent::MouseScroll(match delta {
+                                    MouseScrollDelta::LineDelta(_, scroll) => scroll * 100.0,
+                                    MouseScrollDelta::PixelDelta(PhysicalPosition {
+                                        y: scroll,
+                                        ..
+                                    }) => scroll as f32,
+                                }))
                         }
                         _ => {}
                     }

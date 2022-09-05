@@ -1,9 +1,13 @@
 use winit::event::{ElementState, MouseButton, VirtualKeyCode};
 
-trait Controller {
-    fn on_keyboard_input(&mut self, state: ElementState, key: VirtualKeyCode);
-    fn on_mouse_move(&mut self, position: (f32, f32));
-    fn on_mouse_wheel(&mut self, delta: f32);
-    fn on_mouse_input(&mut self, state: ElementState, button: MouseButton);
+pub enum ControllerEvent {
+    MouseMove((f64, f64)),
+    MouseScroll(f32),
+    MouseInput(ElementState, MouseButton),
+    KeyboardInput(ElementState, VirtualKeyCode),
+}
+
+pub trait Controller {
+    fn input(&mut self, event: ControllerEvent);
     fn update(&mut self, dt: std::time::Duration);
 }
