@@ -4,7 +4,7 @@ use wgpu::util::DeviceExt;
 use winit::{event::Event, window::Window};
 
 use crate::{
-    camera::{Camera, PerspectiveCamera, Projection},
+    camera::{Camera, FPSCamera, Projection},
     controller::Controller,
     model::{DrawLight, DrawModel, Model},
     resources::{load_model, Instance, InstanceRaw, ModelVertex, Vertex},
@@ -40,7 +40,7 @@ pub struct Renderer {
 
     pub size: winit::dpi::PhysicalSize<u32>,
     pub instances: Vec<Instance>,
-    pub camera: PerspectiveCamera,
+    pub camera: FPSCamera,
     pub obj_model: Model,
     pub light_uniform: LightUniform,
 }
@@ -111,11 +111,13 @@ impl Renderer {
         surface.configure(&device, &config);
 
         // ====================== Create Camera ======================
-        let camera = PerspectiveCamera::new(
+        let camera = FPSCamera::new(
             (0.0, 10.0, 20.0),
-            (0.0, 0.0, 0.0),
+            Deg(-90.0),
+            Deg(-20.0),
             Projection::new(config.width, config.height, Deg(45.0), 0.1, 100.0),
-            50.0,
+            4.0,
+            0.4,
         );
         // ==========================================================
 
@@ -316,7 +318,9 @@ impl Renderer {
             self.surface.configure(&self.device, &self.config);
             self.depth_texture =
                 Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
-            self.camera.projection_mut().resize(new_size.width, new_size.height);
+            self.camera
+                .projection_mut()
+                .resize(new_size.width, new_size.height);
         }
     }
 

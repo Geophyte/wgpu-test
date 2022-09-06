@@ -1,4 +1,4 @@
-mod camera;
+pub mod camera;
 mod controller;
 mod renderer;
 mod resources;
