@@ -1,14 +1,14 @@
-use cgmath::prelude::*;
+use cgmath::{prelude::*, Deg};
 use itertools::Itertools;
 use wgpu::util::DeviceExt;
 use winit::{event::Event, window::Window};
 
 use crate::{
-    camera::{Camera, PerspectiveCamera},
+    camera::{Camera, PerspectiveCamera, Projection},
     controller::Controller,
-    resources::{
-        load_model, Instance, InstanceRaw, ModelVertex, Vertex,
-    }, model::{DrawModel, Model, DrawLight}, texture::Texture,
+    model::{DrawLight, DrawModel, Model},
+    resources::{load_model, Instance, InstanceRaw, ModelVertex, Vertex},
+    texture::Texture,
 };
 
 #[repr(C)]
@@ -110,8 +110,14 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
-        // Create camera
-        let camera = PerspectiveCamera::new(config.width as f32 / config.height as f32, 30.0);
+        // ====================== Create Camera ======================
+        let camera = PerspectiveCamera::new(
+            (0.0, 10.0, 20.0),
+            (0.0, 0.0, 0.0),
+            Projection::new(config.width, config.height, Deg(45.0), 0.1, 100.0),
+            50.0,
+        );
+        // ==========================================================
 
         // Create textures
         let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
@@ -267,10 +273,7 @@ impl Renderer {
             };
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Light Render Pipeline Layout"),
-                bind_group_layouts: &[
-                    &camera_bind_group_layout,
-                    &light_bind_group_layout,
-                ],
+                bind_group_layouts: &[&camera_bind_group_layout, &light_bind_group_layout],
                 push_constant_ranges: &[],
             });
             create_render_pipeline(
@@ -282,7 +285,7 @@ impl Renderer {
                 &[ModelVertex::desc()],
                 shader,
             )
-        }; 
+        };
 
         return Self {
             surface,
@@ -313,6 +316,7 @@ impl Renderer {
             self.surface.configure(&self.device, &self.config);
             self.depth_texture =
                 Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
+            self.camera.projection_mut().resize(new_size.width, new_size.height);
         }
     }
 
@@ -382,7 +386,11 @@ impl Renderer {
 
             // Render light (for debbuging)
             render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model(&self.obj_model, &self.camera_bind_group, &self.light_bind_group);
+            render_pass.draw_light_model(
+                &self.obj_model,
+                &self.camera_bind_group,
+                &self.light_bind_group,
+            );
 
             // Render models
             render_pass.set_pipeline(&self.render_pipeline);
