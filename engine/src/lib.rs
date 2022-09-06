@@ -4,6 +4,7 @@ mod renderer;
 mod resources;
 mod texture;
 mod model;
+mod light;
 
 use controller::{Controller, ControllerEvent};
 use renderer::Renderer;

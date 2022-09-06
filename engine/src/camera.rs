@@ -45,7 +45,7 @@ impl Projection {
 }
 
 pub trait Camera {
-    fn view_proj(&self) -> CameraUniform;
+    fn uniform(&self) -> CameraUniform;
     fn projection(&self) -> &Projection;
     fn projection_mut(&mut self) -> &mut Projection;
 }
@@ -88,7 +88,7 @@ impl PerspectiveCamera {
 }
 
 impl Camera for PerspectiveCamera {
-    fn view_proj(&self) -> CameraUniform {
+    fn uniform(&self) -> CameraUniform {
         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
         let proj = self.projection.calc_matrix();
 
@@ -229,7 +229,7 @@ impl FPSCamera {
 }
 
 impl Camera for FPSCamera {
-    fn view_proj(&self) -> CameraUniform {
+    fn uniform(&self) -> CameraUniform {
         let view = Matrix4::look_to_rh(
             self.position,
             cgmath::Vector3::new(self.yaw.0.cos(), self.pitch.0.sin(), self.yaw.0.sin()).normalize(),

@@ -6,6 +6,7 @@ use winit::{event::Event, window::Window};
 use crate::{
     camera::{Camera, FPSCamera, Projection},
     controller::Controller,
+    light::{AmbientLight, Light},
     model::{DrawLight, DrawModel, Model},
     resources::{load_model, Instance, InstanceRaw, ModelVertex, Vertex},
     texture::Texture,
@@ -42,7 +43,7 @@ pub struct Renderer {
     pub instances: Vec<Instance>,
     pub camera: FPSCamera,
     pub obj_model: Model,
-    pub light_uniform: LightUniform,
+    pub ambient_light: AmbientLight,
 }
 
 impl Renderer {
@@ -124,14 +125,12 @@ impl Renderer {
         // Create textures
         let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
-        // ====================== Create Ligth ======================
-        let light_uniform = LightUniform {
-            position: [2.0, 2.0, 2.0],
-            _padding: 0,
+        // ====================== Create Ligths ======================
+        let ambient_light = AmbientLight {
             color: [1.0, 1.0, 1.0],
-            _padding2: 0,
+            ambient_strength: 0.1,
         };
-        // ==========================================================
+        // ===========================================================
 
         // Create buffers
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -141,12 +140,12 @@ impl Renderer {
         });
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[camera.view_proj()]),
+            contents: bytemuck::cast_slice(&[camera.uniform()]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Light Buffer"),
-            contents: bytemuck::cast_slice(&[light_uniform]),
+            contents: bytemuck::cast_slice(&[ambient_light.uniform()]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -306,7 +305,7 @@ impl Renderer {
             instances,
             camera,
             obj_model,
-            light_uniform,
+            ambient_light,
         };
     }
 
@@ -335,19 +334,15 @@ impl Renderer {
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
-            bytemuck::cast_slice(&[self.camera.view_proj()]),
+            bytemuck::cast_slice(&[self.camera.uniform()]),
         );
 
         // Update light
-        let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
-        self.light_uniform.position =
-            (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(1.0))
-                * old_position)
-                .into();
+        self.ambient_light.ambient_strength += f32::sin(dt.as_secs_f32());
         self.queue.write_buffer(
             &self.light_buffer,
             0,
-            bytemuck::cast_slice(&[self.light_uniform]),
+            bytemuck::cast_slice(&[self.ambient_light.uniform()]),
         );
     }
 
@@ -389,12 +384,12 @@ impl Renderer {
             });
 
             // Render light (for debbuging)
-            render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model(
-                &self.obj_model,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            );
+            //render_pass.set_pipeline(&self.light_render_pipeline);
+            //render_pass.draw_light_model(
+            //    &self.obj_model,
+            //    &self.camera_bind_group,
+            //    &self.light_bind_group,
+            //);
 
             // Render models
             render_pass.set_pipeline(&self.render_pipeline);

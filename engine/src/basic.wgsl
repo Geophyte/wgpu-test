@@ -6,8 +6,7 @@ struct Camera {
 var<uniform> camera: Camera;
 
 struct Light {
-    position: vec3<f32>,
-    color: vec3<f32>,
+    ambient_light: vec4<f32>,
 }
 @group(2) @binding(0)
 var<uniform> light: Light;
@@ -61,12 +60,18 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
         world_normal
     ));
 
+    //var out: VertexOutput;
+    //out.clip_position = camera.view_proj * world_position;
+    //out.tex_coord = model.tex_coord;
+    //out.tangent_position = tangent_matrix * world_position.xyz;
+    //out.tangent_view_position = tangent_matrix * camera.view_pos.xyz;
+    //out.tangent_light_position = tangent_matrix * light.position;
     var out: VertexOutput;
     out.clip_position = camera.view_proj * world_position;
     out.tex_coord = model.tex_coord;
-    out.tangent_position = tangent_matrix * world_position.xyz;
-    out.tangent_view_position = tangent_matrix * camera.view_pos.xyz;
-    out.tangent_light_position = tangent_matrix * light.position;
+    out.tangent_position = vec3<f32>(0.0, 0.0, 0.0);
+    out.tangent_view_position = vec3<f32>(0.0, 0.0, 0.0);
+    out.tangent_light_position = vec3<f32>(0.0, 0.0, 0.0);
     return out;
 }
 
@@ -81,24 +86,31 @@ var s_normal: sampler;
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    //let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, input.tex_coord);
+    //let object_normal: vec4<f32> = textureSample(t_normal, s_normal, input.tex_coord);
+
+    //let ambient_strength = 0.1;
+    //let ambient_color = light.color * ambient_strength;
+
+    //let tangent_normal = object_normal.xyz * 2.0 - 1.0;
+    //let light_dir = normalize(input.tangent_light_position - input.tangent_position);
+    //let view_dir = normalize(input.tangent_view_position - input.tangent_position);
+    //let half_dir = normalize(view_dir + light_dir);
+
+    //let diffuse_strength = max(dot(tangent_normal, light_dir), 0.0);
+    //let diffuse_color = light.color * diffuse_strength;
+
+    //let specular_strength = pow(max(dot(tangent_normal, half_dir), 0.0), 32.0);
+    //let specular_color = light.color * specular_strength;
+
+    //let result = (ambient_color + diffuse_color + specular_color) * object_color.xyz;
+
     let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, input.tex_coord);
-    let object_normal: vec4<f32> = textureSample(t_normal, s_normal, input.tex_coord);
 
-    let ambient_strength = 0.1;
-    let ambient_color = light.color * ambient_strength;
+    //let ambient_color = light.color * light.ambient_strength;
+    let ambient_color = light.ambient_light.xyz * light.ambient_light.w;
 
-    let tangent_normal = object_normal.xyz * 2.0 - 1.0;
-    let light_dir = normalize(input.tangent_light_position - input.tangent_position);
-    let view_dir = normalize(input.tangent_view_position - input.tangent_position);
-    let half_dir = normalize(view_dir + light_dir);
-
-    let diffuse_strength = max(dot(tangent_normal, light_dir), 0.0);
-    let diffuse_color = light.color * diffuse_strength;
-
-    let specular_strength = pow(max(dot(tangent_normal, half_dir), 0.0), 32.0);
-    let specular_color = light.color * specular_strength;
-
-    let result = (ambient_color + diffuse_color + specular_color) * object_color.xyz;
+    let result = (ambient_color) * object_color.xyz;
 
     return vec4<f32>(result, object_color.a);
 }
