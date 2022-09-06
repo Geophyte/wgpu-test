@@ -7,8 +7,8 @@ use crate::{
     camera::{Camera, PerspectiveCamera},
     controller::Controller,
     resources::{
-        load_model, Instance, InstanceRaw, ModelVertex, Texture, Vertex,
-    }, model::{DrawModel, Model, DrawLight},
+        load_model, Instance, InstanceRaw, ModelVertex, Vertex,
+    }, model::{DrawModel, Model, DrawLight}, texture::Texture,
 };
 
 #[repr(C)]
@@ -158,6 +158,22 @@ impl Renderer {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,

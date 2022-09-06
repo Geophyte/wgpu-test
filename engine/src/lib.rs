@@ -2,6 +2,7 @@ mod camera;
 mod controller;
 mod renderer;
 mod resources;
+mod texture;
 mod model;
 
 use controller::{Controller, ControllerEvent};

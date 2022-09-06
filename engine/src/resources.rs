@@ -1,9 +1,12 @@
 use anyhow::*;
-use image::GenericImageView;
+use itertools::Itertools;
 use std::io::{BufReader, Cursor};
 use wgpu::util::DeviceExt;
 
-use crate::model::{Material, Mesh, Model};
+use crate::{
+    model::{Material, Mesh, Model},
+    texture::Texture,
+};
 
 pub trait Vertex {
     fn desc<'a>() -> wgpu::VertexBufferLayout<'a>;
@@ -15,6 +18,8 @@ pub struct ModelVertex {
     pub position: [f32; 3],
     pub tex_coords: [f32; 2],
     pub normal: [f32; 3],
+    pub tangent: [f32; 3],
+    pub bitangent: [f32; 3],
 }
 
 impl Vertex for ModelVertex {
@@ -36,6 +41,16 @@ impl Vertex for ModelVertex {
                 wgpu::VertexAttribute {
                     offset: std::mem::size_of::<[f32; 5]>() as wgpu::BufferAddress,
                     shader_location: 2,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+                    shader_location: 3,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 11]>() as wgpu::BufferAddress,
+                    shader_location: 4,
                     format: wgpu::VertexFormat::Float32x3,
                 },
             ],
@@ -113,127 +128,6 @@ impl InstanceRaw {
     }
 }
 
-pub struct Texture {
-    pub texture: wgpu::Texture,
-    pub view: wgpu::TextureView,
-    pub sampler: wgpu::Sampler,
-}
-
-impl Texture {
-    pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-
-    pub fn create_depth_texture(
-        device: &wgpu::Device,
-        config: &wgpu::SurfaceConfiguration,
-        label: &str,
-    ) -> Self {
-        let size = wgpu::Extent3d {
-            width: config.width,
-            height: config.height,
-            depth_or_array_layers: 1,
-        };
-        let desc = wgpu::TextureDescriptor {
-            label: Some(label),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: Self::DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        };
-        let texture = device.create_texture(&desc);
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            // 4.
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            compare: Some(wgpu::CompareFunction::LessEqual),
-            lod_min_clamp: -100.0,
-            lod_max_clamp: 100.0,
-            ..Default::default()
-        });
-
-        Self {
-            texture,
-            view,
-            sampler,
-        }
-    }
-
-    pub fn from_bytes(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        bytes: &[u8],
-        label: &str,
-    ) -> Result<Self> {
-        let img = image::load_from_memory(bytes)?;
-        Self::from_image(device, queue, &img, Some(label))
-    }
-
-    pub fn from_image(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        img: &image::DynamicImage,
-        label: Option<&str>,
-    ) -> Result<Self> {
-        let rgba = img.to_rgba8();
-        let dimensions = img.dimensions();
-
-        let size = wgpu::Extent3d {
-            width: dimensions.0,
-            height: dimensions.1,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label,
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        });
-
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                aspect: wgpu::TextureAspect::All,
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-            },
-            &rgba,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: std::num::NonZeroU32::new(4 * dimensions.0),
-                rows_per_image: std::num::NonZeroU32::new(dimensions.1),
-            },
-            size,
-        );
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-
-        Ok(Self {
-            texture,
-            view,
-            sampler,
-        })
-    }
-}
-
 pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
     let path = std::path::Path::new(env!("OUT_DIR"))
         .join("res")
@@ -254,11 +148,12 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
 
 pub async fn load_texture(
     file_name: &str,
+    is_normal_map: bool,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> anyhow::Result<Texture> {
     let data = load_binary(file_name).await?;
-    Texture::from_bytes(device, queue, &data, file_name)
+    Texture::from_bytes(device, queue, &data, file_name, is_normal_map)
 }
 
 pub async fn load_model(
@@ -287,33 +182,22 @@ pub async fn load_model(
 
     let mut materials = Vec::new();
     for m in obj_materials? {
-        let diffuse_texture = load_texture(&m.diffuse_texture, device, queue).await?;
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                },
-            ],
-            label: None,
-        });
+        let diffuse_texture = load_texture(&m.diffuse_texture, false, device, queue).await?;
+        let normal_texture = load_texture(&m.normal_texture, true, device, queue).await?;
 
-        materials.push(Material {
-            name: m.name,
+        materials.push(Material::new(
+            device,
+            &m.name,
             diffuse_texture,
-            bind_group,
-        })
+            normal_texture,
+            layout,
+        ))
     }
 
     let meshes = models
         .into_iter()
         .map(|m| {
-            let vertices = (0..m.mesh.positions.len() / 3)
+            let mut vertices = (0..m.mesh.positions.len() / 3)
                 .map(|i| ModelVertex {
                     position: [
                         m.mesh.positions[i * 3],
@@ -326,8 +210,72 @@ pub async fn load_model(
                         m.mesh.normals[i * 3 + 1],
                         m.mesh.normals[i * 3 + 2],
                     ],
+                    tangent: [0.0; 3],
+                    bitangent: [0.0; 3],
                 })
-                .collect::<Vec<_>>();
+                .collect_vec();
+
+            let indices = &m.mesh.indices;
+            let mut triangles_included = vec![0; vertices.len()];
+
+            for c in indices.chunks(3) {
+                let v0 = vertices[c[0] as usize];
+                let v1 = vertices[c[1] as usize];
+                let v2 = vertices[c[2] as usize];
+
+                let pos0: cgmath::Vector3<_> = v0.position.into();
+                let pos1: cgmath::Vector3<_> = v1.position.into();
+                let pos2: cgmath::Vector3<_> = v2.position.into();
+
+                let uv0: cgmath::Vector2<_> = v0.tex_coords.into();
+                let uv1: cgmath::Vector2<_> = v1.tex_coords.into();
+                let uv2: cgmath::Vector2<_> = v2.tex_coords.into();
+
+                // Calculate the edges of the triangle
+                let delta_pos1 = pos1 - pos0;
+                let delta_pos2 = pos2 - pos0;
+
+                let delta_uv1 = uv1 - uv0;
+                let delta_uv2 = uv2 - uv0;
+
+                // Solving the following system of equations will
+                // give us the tangent and bitangent.
+                //     delta_pos1 = delta_uv1.x * T + delta_u.y * B
+                //     delta_pos2 = delta_uv2.x * T + delta_uv2.y * B
+                let r = 1.0 / (delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x);
+                let tangent = (delta_pos1 * delta_uv2.y - delta_pos2 * delta_uv1.y) * r;
+
+                // Flip the bitangent to enable right-handed normal
+                // maps with wgpu texture coordinate system
+                let bitangent = (delta_pos2 * delta_uv1.x - delta_pos1 * delta_uv2.x) * -r;
+
+                // Use the same tangent/bitangent for each vertex in the triangle
+                vertices[c[0] as usize].tangent =
+                    (tangent + cgmath::Vector3::from(vertices[c[0] as usize].tangent)).into();
+                vertices[c[1] as usize].tangent =
+                    (tangent + cgmath::Vector3::from(vertices[c[1] as usize].tangent)).into();
+                vertices[c[2] as usize].tangent =
+                    (tangent + cgmath::Vector3::from(vertices[c[2] as usize].tangent)).into();
+                vertices[c[0] as usize].bitangent =
+                    (bitangent + cgmath::Vector3::from(vertices[c[0] as usize].bitangent)).into();
+                vertices[c[1] as usize].bitangent =
+                    (bitangent + cgmath::Vector3::from(vertices[c[1] as usize].bitangent)).into();
+                vertices[c[2] as usize].bitangent =
+                    (bitangent + cgmath::Vector3::from(vertices[c[2] as usize].bitangent)).into();
+
+                // Used to average the tangents/bitangents
+                triangles_included[c[0] as usize] += 1;
+                triangles_included[c[1] as usize] += 1;
+                triangles_included[c[2] as usize] += 1;
+            }
+
+            // Average the tangents/bitangents
+            for (i, n) in triangles_included.into_iter().enumerate() {
+                let denom = 1.0 / n as f32;
+                let mut v = &mut vertices[i];
+                v.tangent = (cgmath::Vector3::from(v.tangent) * denom).into();
+                v.bitangent = (cgmath::Vector3::from(v.bitangent) * denom).into();
+            }
 
             let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("{:?} Vertex Buffer", file_name)),
@@ -348,7 +296,7 @@ pub async fn load_model(
                 material: m.mesh.material_id.unwrap_or(0),
             }
         })
-        .collect::<Vec<_>>();
+        .collect_vec();
 
     Ok(Model { meshes, materials })
 }
