@@ -15,12 +15,18 @@ struct PointLight {
     attenuation: vec3<f32>,
     position: vec3<f32>
 };
+struct SpotLight {
+    base: PointLight,
+    direction_ccos: vec4<f32>
+}
 @group(1) @binding(0)
 var<uniform> ambient_light: vec4<f32>;
 @group(1) @binding(1)
 var<uniform> directional_light: DirectionalLight;
 @group(1) @binding(2)
 var<uniform> point_light: PointLight;
+@group(1) @binding(3)
+var<uniform> spot_light: SpotLight;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -37,8 +43,8 @@ fn vs_main(
 ) -> VertexOutput {
     let scale = 0.25;
     var out: VertexOutput;
-    out.clip_position = camera.view_proj * vec4<f32>(model.position * scale + point_light.position, 1.0);
-    out.color = point_light.color;
+    out.clip_position = camera.view_proj * vec4<f32>(model.position * scale + spot_light.base.position.xyz, 1.0);
+    out.color = spot_light.base.color;
     return out;
 }
 

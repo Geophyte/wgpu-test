@@ -15,12 +15,18 @@ struct PointLight {
     attenuation: vec3<f32>,
     position: vec3<f32>
 };
+struct SpotLight {
+    base: PointLight,
+    direction_ccos: vec4<f32>
+}
 @group(2) @binding(0)
 var<uniform> ambient_light: vec4<f32>;
 @group(2) @binding(1)
 var<uniform> directional_light: DirectionalLight;
 @group(2) @binding(2)
 var<uniform> point_light: PointLight;
+@group(2) @binding(3)
+var<uniform> spot_light: SpotLight;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -108,20 +114,30 @@ fn calculate_directional_light_color(light: DirectionalLight, input: VertexOutpu
 }
 
 fn calculate_point_light_color(light: PointLight, input: VertexOutput) -> vec3<f32> {
+    var base: DirectionalLight;
+    base.direction = light.position - input.world_position;
+    base.color_strength = vec4<f32>(light.color, 1.0);
+    let color = calculate_directional_light_color(base, input);
+
     let distance = length(light.position - input.world_position);
-    let light_dir = normalize(light.position - input.world_position);
-    let view_dir = normalize(camera.view_pos.xyz - input.world_position);
-    let half_dir = normalize(view_dir + light_dir);
-
-    let diffuse_strength = max(dot(input.world_normal, light_dir), 0.0);
-    let diffuse_color = light.color * diffuse_strength;
-
-    let specular_strength = pow(max(dot(input.world_normal, half_dir), 0.0), 32.0);
-    let specular_color = specular_strength * light.color;
-
     let atteniuation = light.attenuation.x + light.attenuation.y * distance + light.attenuation.z * distance * distance;
 
-    return (diffuse_color + specular_color) / atteniuation;
+    return color / atteniuation;
+}
+
+fn calculate_spot_light_color(light: SpotLight, input: VertexOutput) -> vec3<f32> {
+    let color = calculate_point_light_color(light.base, input);
+
+    let light_to_pixel = normalize(input.world_position - light.base.position);
+    let spot_factor = dot(light_to_pixel, light.direction_ccos.xyz);
+
+    var result = vec3<f32>(0.0, 0.0, 0.0);
+    if (spot_factor > light.direction_ccos.w) {
+        let spot_light_intensity = 1.0 - (1.0 - spot_factor) / (1.0 - light.direction_ccos.w);
+        result = color * spot_light_intensity;
+    }
+
+    return result;
 }
 
 @fragment
@@ -150,7 +166,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let ambient_strength = ambient_light.w;
     let ambient_color = ambient_light.xyz * ambient_strength;
 
-    let result = (ambient_color + calculate_directional_light_color(directional_light, input) + calculate_point_light_color(point_light, input)) * object_color.xyz;
+    let result = (ambient_color + calculate_directional_light_color(directional_light, input) + calculate_point_light_color(point_light, input) + calculate_spot_light_color(spot_light, input)) * object_color.xyz;
 
     return vec4<f32>(result, object_color.a);
 }

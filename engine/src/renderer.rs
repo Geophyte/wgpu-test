@@ -6,7 +6,7 @@ use winit::{event::Event, window::Window};
 use crate::{
     camera::{Camera, FPSCamera, Projection},
     controller::Controller,
-    light::{AmbientLight, Attenuation, DirectionalLight, PointLight},
+    light::{AmbientLight, Attenuation, DirectionalLight, PointLight, SpotLight},
     model::{DrawLight, DrawModel, Model},
     resources::{load_model, Instance, InstanceRaw, ModelVertex, Vertex},
     texture::Texture,
@@ -32,6 +32,7 @@ pub struct Renderer {
     ambient_light_buffer: wgpu::Buffer,
     directional_light_buffer: wgpu::Buffer,
     point_light_buffer: wgpu::Buffer,
+    spot_light_buffer: wgpu::Buffer,
 
     depth_texture: Texture,
 
@@ -47,6 +48,7 @@ pub struct Renderer {
     pub ambient_light: AmbientLight,
     pub directional_light: DirectionalLight,
     pub point_light: PointLight,
+    pub spot_light: SpotLight,
 }
 
 impl Renderer {
@@ -56,7 +58,7 @@ impl Renderer {
         // ====================== Create Instances ======================
         const NUM_INSTANCES_PER_ROW: u32 = 10;
         const SPACE_BETWEEN: f32 = 3.0;
-        let instances = (0..NUM_INSTANCES_PER_ROW)
+        let mut instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
                     let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
@@ -147,6 +149,19 @@ impl Renderer {
             },
             position: [2.0, 2.0, 2.0].into(),
         };
+        let spot_light = SpotLight {
+            base: PointLight {
+                color: [1.0, 0.0, 0.0],
+                attenuation: Attenuation {
+                    constant: 1.0,
+                    linear: 1.0,
+                    exp: 1.0,
+                },
+                position: (3.0, 3.0, 3.0).into(),
+            },
+            direction: (0.0, -1.0, 1.0).into(),
+            cutoff: Deg(20.0).into(),
+        };
         // ===========================================================
 
         // Create buffers
@@ -174,6 +189,11 @@ impl Renderer {
         let point_light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Point Light Buffer"),
             contents: bytemuck::cast_slice(&[point_light.uniform()]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let spot_light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Spot Light Buffer"),
+            contents: bytemuck::cast_slice(&[spot_light.uniform()]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -273,6 +293,16 @@ impl Renderer {
                         },
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
                 label: Some("light_bind_group_layout"),
             });
@@ -290,6 +320,10 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: point_light_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: spot_light_buffer.as_entire_binding(),
                 },
             ],
             label: Some("light_bind_group"),
@@ -359,6 +393,7 @@ impl Renderer {
             ambient_light_buffer,
             directional_light_buffer,
             point_light_buffer,
+            spot_light_buffer,
             camera_bind_group,
             light_bind_group,
             render_pipeline,
@@ -370,6 +405,7 @@ impl Renderer {
             ambient_light,
             directional_light,
             point_light,
+            spot_light,
         };
     }
 

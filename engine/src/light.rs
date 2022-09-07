@@ -1,3 +1,5 @@
+use cgmath::Angle;
+
 pub struct AmbientLight {
     pub color: [f32; 3],
     pub strength: f32,
@@ -70,6 +72,33 @@ impl PointLight {
             _padding2: 0,
             position: self.position.into(),
             _padding3: 0,
+        };
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct SpotLightUniform {
+    base_uniform: PointLightUniform,
+    direction_cutoffcos: [f32; 4],
+}
+
+pub struct SpotLight {
+    pub base: PointLight,
+    pub direction: cgmath::Vector3<f32>,
+    pub cutoff: cgmath::Rad<f32>,
+}
+
+impl SpotLight {
+    pub fn uniform(&self) -> SpotLightUniform {
+        return SpotLightUniform {
+            base_uniform: self.base.uniform(),
+            direction_cutoffcos: [
+                self.direction.x,
+                self.direction.y,
+                self.direction.z,
+                self.cutoff.cos(),
+            ],
         };
     }
 }
