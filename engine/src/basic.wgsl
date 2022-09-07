@@ -10,10 +10,17 @@ struct DirectionalLight {
     color_strength: vec4<f32>,
     direction: vec3<f32>
 };
+struct PointLight {
+    color: vec3<f32>,
+    attenuation: vec3<f32>,
+    position: vec3<f32>
+};
 @group(2) @binding(0)
 var<uniform> ambient_light: vec4<f32>;
 @group(2) @binding(1)
 var<uniform> directional_light: DirectionalLight;
+@group(2) @binding(2)
+var<uniform> point_light: PointLight;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -86,6 +93,37 @@ var t_normal: texture_2d<f32>;
 @group(0)@binding(3)
 var s_normal: sampler;
 
+fn calculate_directional_light_color(light: DirectionalLight, input: VertexOutput) -> vec3<f32> {
+    let light_dir = normalize(light.direction);
+    let view_dir = normalize(camera.view_pos.xyz - input.world_position);
+    let half_dir = normalize(view_dir + light_dir);
+
+    let diffuse_strength = max(dot(input.world_normal, light_dir), 0.0) * light.color_strength.w;
+    let diffuse_color = light.color_strength.xyz * diffuse_strength;
+
+    let specular_strength = pow(max(dot(input.world_normal, half_dir), 0.0), 32.0) * light.color_strength.w;
+    let specular_color = specular_strength * light.color_strength.xyz;
+
+    return diffuse_color + specular_color;
+}
+
+fn calculate_point_light_color(light: PointLight, input: VertexOutput) -> vec3<f32> {
+    let distance = length(light.position - input.world_position);
+    let light_dir = normalize(light.position - input.world_position);
+    let view_dir = normalize(camera.view_pos.xyz - input.world_position);
+    let half_dir = normalize(view_dir + light_dir);
+
+    let diffuse_strength = max(dot(input.world_normal, light_dir), 0.0);
+    let diffuse_color = light.color * diffuse_strength;
+
+    let specular_strength = pow(max(dot(input.world_normal, half_dir), 0.0), 32.0);
+    let specular_color = specular_strength * light.color;
+
+    let atteniuation = light.attenuation.x + light.attenuation.y * distance + light.attenuation.z * distance * distance;
+
+    return (diffuse_color + specular_color) / atteniuation;
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     //let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, input.tex_coord);
@@ -112,17 +150,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let ambient_strength = ambient_light.w;
     let ambient_color = ambient_light.xyz * ambient_strength;
 
-    let light_dir = normalize(directional_light.direction);
-    let view_dir = normalize(camera.view_pos.xyz - input.world_position);
-    let reflect_dir = reflect(-light_dir, input.world_normal);
-
-    let diffuse_strength = max(dot(input.world_normal, light_dir), 0.0) * directional_light.color_strength.w;
-    let diffuse_color = directional_light.color_strength.xyz * diffuse_strength;
-
-    let specular_strength = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0) * directional_light.color_strength.w;
-    let specular_color = specular_strength * directional_light.color_strength.xyz;
-
-    let result = (ambient_color + diffuse_color + specular_color) * object_color.xyz;
+    let result = (ambient_color + calculate_directional_light_color(directional_light, input) + calculate_point_light_color(point_light, input)) * object_color.xyz;
 
     return vec4<f32>(result, object_color.a);
 }

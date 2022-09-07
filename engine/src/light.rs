@@ -32,3 +32,44 @@ impl DirectionalLight {
         };
     }
 }
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct PointLightUniform {
+    color: [f32; 3],
+    _padding1: u32,
+    attenuation: [f32; 3],
+    _padding2: u32,
+    position: [f32; 3],
+    _padding3: u32,
+}
+
+#[derive(Debug)]
+pub struct Attenuation {
+    pub constant: f32,
+    pub linear: f32,
+    pub exp: f32,
+}
+
+pub struct PointLight {
+    pub color: [f32; 3],
+    pub attenuation: Attenuation,
+    pub position: cgmath::Vector3<f32>,
+}
+
+impl PointLight {
+    pub fn uniform(&self) -> PointLightUniform {
+        return PointLightUniform {
+            color: self.color,
+            _padding1: 0,
+            attenuation: [
+                self.attenuation.constant,
+                self.attenuation.linear,
+                self.attenuation.exp,
+            ],
+            _padding2: 0,
+            position: self.position.into(),
+            _padding3: 0,
+        };
+    }
+}
