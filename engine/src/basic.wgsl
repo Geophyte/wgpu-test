@@ -5,11 +5,15 @@ struct Camera {
 @group(1) @binding(0)
 var<uniform> camera: Camera;
 
-struct Light {
-    ambient_light: vec4<f32>,
-}
+// Lights
+struct DirectionalLight {
+    color_strength: vec4<f32>,
+    direction: vec3<f32>
+};
 @group(2) @binding(0)
-var<uniform> light: Light;
+var<uniform> ambient_light: vec4<f32>;
+@group(2) @binding(1)
+var<uniform> directional_light: DirectionalLight;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -32,9 +36,11 @@ struct InstanceInput {
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) tex_coord: vec2<f32>,
-    @location(1) tangent_position: vec3<f32>,
-    @location(2) tangent_light_position: vec3<f32>,
-    @location(3) tangent_view_position: vec3<f32>
+    @location(1) world_normal: vec3<f32>,
+    @location(2) world_position: vec3<f32>
+    //@location(1) tangent_position: vec3<f32>,
+    //@location(2) tangent_view_position: vec3<f32>,
+    //@location(3) tangent_light_position: vec3<f32>,
 };
 
 @vertex
@@ -60,18 +66,14 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
         world_normal
     ));
 
-    //var out: VertexOutput;
-    //out.clip_position = camera.view_proj * world_position;
-    //out.tex_coord = model.tex_coord;
-    //out.tangent_position = tangent_matrix * world_position.xyz;
-    //out.tangent_view_position = tangent_matrix * camera.view_pos.xyz;
-    //out.tangent_light_position = tangent_matrix * light.position;
     var out: VertexOutput;
     out.clip_position = camera.view_proj * world_position;
     out.tex_coord = model.tex_coord;
-    out.tangent_position = vec3<f32>(0.0, 0.0, 0.0);
-    out.tangent_view_position = vec3<f32>(0.0, 0.0, 0.0);
-    out.tangent_light_position = vec3<f32>(0.0, 0.0, 0.0);
+    out.world_normal = (model_matrix * vec4<f32>(model.normal, 0.0)).xyz;
+    out.world_position = (model_matrix * vec4<f32>(model.position, 1.0)).xyz;
+    //out.tangent_position = tangent_matrix * world_position.xyz;
+    //out.tangent_view_position = tangent_matrix * camera.view_pos.xyz;
+    //out.tangent_light_position = normalize(tangent_matrix * (model.position + directional_light.direction));
     return out;
 }
 
@@ -107,10 +109,20 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, input.tex_coord);
 
-    //let ambient_color = light.color * light.ambient_strength;
-    let ambient_color = light.ambient_light.xyz * light.ambient_light.w;
+    let ambient_strength = ambient_light.w;
+    let ambient_color = ambient_light.xyz * ambient_strength;
 
-    let result = (ambient_color) * object_color.xyz;
+    let light_dir = normalize(directional_light.direction);
+    let view_dir = normalize(camera.view_pos.xyz - input.world_position);
+    let reflect_dir = reflect(-light_dir, input.world_normal);
+
+    let diffuse_strength = max(dot(input.world_normal, light_dir), 0.0) * directional_light.color_strength.w;
+    let diffuse_color = directional_light.color_strength.xyz * diffuse_strength;
+
+    let specular_strength = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0) * directional_light.color_strength.w;
+    let specular_color = specular_strength * directional_light.color_strength.xyz;
+
+    let result = (ambient_color + diffuse_color + specular_color) * object_color.xyz;
 
     return vec4<f32>(result, object_color.a);
 }

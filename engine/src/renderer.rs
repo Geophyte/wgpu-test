@@ -6,8 +6,8 @@ use winit::{event::Event, window::Window};
 use crate::{
     camera::{Camera, FPSCamera, Projection},
     controller::Controller,
-    light::{AmbientLight, Light},
-    model::{DrawLight, DrawModel, Model},
+    light::{AmbientLight, DirectionalLight},
+    model::{DrawModel, Model},
     resources::{load_model, Instance, InstanceRaw, ModelVertex, Vertex},
     texture::Texture,
 };
@@ -29,7 +29,8 @@ pub struct Renderer {
 
     instance_buffer: wgpu::Buffer,
     camera_buffer: wgpu::Buffer,
-    light_buffer: wgpu::Buffer,
+    ambient_light_buffer: wgpu::Buffer,
+    directional_light_buffer: wgpu::Buffer,
 
     depth_texture: Texture,
 
@@ -37,13 +38,13 @@ pub struct Renderer {
     light_bind_group: wgpu::BindGroup,
 
     render_pipeline: wgpu::RenderPipeline,
-    light_render_pipeline: wgpu::RenderPipeline,
-
+    //light_render_pipeline: wgpu::RenderPipeline,
     pub size: winit::dpi::PhysicalSize<u32>,
     pub instances: Vec<Instance>,
     pub camera: FPSCamera,
     pub obj_model: Model,
     pub ambient_light: AmbientLight,
+    pub directional_light: DirectionalLight,
 }
 
 impl Renderer {
@@ -128,7 +129,12 @@ impl Renderer {
         // ====================== Create Ligths ======================
         let ambient_light = AmbientLight {
             color: [1.0, 1.0, 1.0],
-            ambient_strength: 0.1,
+            strength: 0.1,
+        };
+        let directional_light = DirectionalLight {
+            color: [0.0, 0.0, 1.0],
+            strength: 1.0,
+            direction: (0.0, 0.0, 1.0).into(),
         };
         // ===========================================================
 
@@ -143,11 +149,17 @@ impl Renderer {
             contents: bytemuck::cast_slice(&[camera.uniform()]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Light Buffer"),
+        let ambient_light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Ambient Light Buffer"),
             contents: bytemuck::cast_slice(&[ambient_light.uniform()]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        let directional_light_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Directional Light Buffer"),
+                contents: bytemuck::cast_slice(&[directional_light.uniform()]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
         // Create bind groups
         let texture_bind_group_layout =
@@ -214,24 +226,42 @@ impl Renderer {
 
         let light_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
                 label: Some("light_bind_group_layout"),
             });
         let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &light_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: light_buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: ambient_light_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: directional_light_buffer.as_entire_binding(),
+                },
+            ],
             label: Some("light_bind_group"),
         });
 
@@ -267,26 +297,26 @@ impl Renderer {
             )
         };
 
-        let light_render_pipeline = {
-            let shader = wgpu::ShaderModuleDescriptor {
-                label: Some("Light Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("light.wgsl").into()),
-            };
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Light Render Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout, &light_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-            create_render_pipeline(
-                "Light Render Pipeline",
-                &device,
-                &layout,
-                config.format,
-                Some(Texture::DEPTH_FORMAT),
-                &[ModelVertex::desc()],
-                shader,
-            )
-        };
+        //let light_render_pipeline = {
+        //    let shader = wgpu::ShaderModuleDescriptor {
+        //        label: Some("Light Shader"),
+        //        source: wgpu::ShaderSource::Wgsl(include_str!("light.wgsl").into()),
+        //    };
+        //    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        //        label: Some("Light Render Pipeline Layout"),
+        //        bind_group_layouts: &[&camera_bind_group_layout, &light_bind_group_layout],
+        //        push_constant_ranges: &[],
+        //    });
+        //    create_render_pipeline(
+        //        "Light Render Pipeline",
+        //        &device,
+        //        &layout,
+        //        config.format,
+        //        Some(Texture::DEPTH_FORMAT),
+        //        &[ModelVertex::desc()],
+        //        shader,
+        //    )
+        //};
 
         return Self {
             surface,
@@ -296,16 +326,17 @@ impl Renderer {
             depth_texture,
             instance_buffer,
             camera_buffer,
-            light_buffer,
+            ambient_light_buffer,
+            directional_light_buffer,
             camera_bind_group,
             light_bind_group,
             render_pipeline,
-            light_render_pipeline,
             size,
             instances,
             camera,
             obj_model,
             ambient_light,
+            directional_light,
         };
     }
 
@@ -338,11 +369,12 @@ impl Renderer {
         );
 
         // Update light
-        self.ambient_light.ambient_strength += f32::sin(dt.as_secs_f32());
+        let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
+        self.directional_light.direction = q.rotate_vector(self.directional_light.direction);
         self.queue.write_buffer(
-            &self.light_buffer,
+            &self.directional_light_buffer,
             0,
-            bytemuck::cast_slice(&[self.ambient_light.uniform()]),
+            bytemuck::cast_slice(&[self.directional_light.uniform()]),
         );
     }
 
