@@ -137,7 +137,7 @@ impl Renderer {
         };
         let directional_light = DirectionalLight {
             color: [0.0, 0.0, 1.0],
-            strength: 1.0,
+            strength: 0.1,
             direction: (0.0, 0.0, 1.0).into(),
         };
         let point_light = PointLight {
@@ -439,7 +439,7 @@ impl Renderer {
 
         // Update lights
         {
-            let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
+            let q = cgmath::Quaternion::from_angle_y(Deg(0.1));
             self.directional_light.direction = q.rotate_vector(self.directional_light.direction);
             self.queue.write_buffer(
                 &self.directional_light_buffer,
@@ -453,15 +453,11 @@ impl Renderer {
                 (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(-1.0))
                     * old_position)
                     .into();
-            let time = self.point_light.attenuation.linear + dt.as_secs_f32();
-            self.point_light.attenuation.exp = time.cos() + 1.0;
-            self.point_light.attenuation.linear = time.sin() + 1.0;
             self.queue.write_buffer(
                 &self.point_light_buffer,
                 0,
                 bytemuck::cast_slice(&[self.point_light.uniform()]),
             );
-            self.point_light.attenuation.linear = time;
         }
     }
 
