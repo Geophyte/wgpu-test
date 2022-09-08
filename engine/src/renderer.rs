@@ -6,7 +6,7 @@ use winit::{event::Event, window::Window};
 use crate::{
     camera::{Camera, FPSCamera, Projection},
     controller::Controller,
-    light::{SceneLights, LightKind},
+    light::{LightBufferManager, LightKind, PointLight, BaseLight, SpotLight},
     model::{DrawLight, DrawModel, Model},
     resources::{load_model, Instance, InstanceRaw, ModelVertex, Vertex},
     texture::Texture,
@@ -40,43 +40,12 @@ pub struct Renderer {
     pub instances: Vec<Instance>,
     pub camera: FPSCamera,
     pub obj_model: Model,
-    pub scene_light: SceneLights
+    pub light_manager: LightBufferManager,
 }
 
 impl Renderer {
     pub async fn new(window: &Window) -> Self {
         let size = window.inner_size();
-
-        // ====================== Create Instances ======================
-        const NUM_INSTANCES_PER_ROW: u32 = 20;
-        const SPACE_BETWEEN: f32 = 2.0;
-        let mut instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-
-                    let position = cgmath::Vector3 { x, y: 0.0, z };
-
-                    //let rotation = if position.is_zero() {
-                    //    cgmath::Quaternion::from_axis_angle(
-                    //        cgmath::Vector3::unit_z(),
-                    //        cgmath::Deg(0.0),
-                    //    )
-                    //} else {
-                    //    cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    //};
-                    let rotation = cgmath::Quaternion::from_axis_angle(
-                        cgmath::Vector3::unit_z(),
-                        cgmath::Deg(0.0),
-                    );
-
-                    Instance { position, rotation }
-                })
-            })
-            .collect::<Vec<_>>();
-        let instance_data = instances.iter().map(Instance::to_raw).collect_vec();
-        // ==============================================================
 
         let instance = wgpu::Instance::new(wgpu::Backends::all());
 
@@ -112,6 +81,66 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
+        // ====================== Create lights ======================
+        const NUM_LIGHTS_PER_ROW: u32 = 10;
+        const SPACE_BETWEEN_LIGHTS: f32 = 5.0;
+        let mut light_manager = LightBufferManager::new(&device);
+        for z in 0..NUM_LIGHTS_PER_ROW {
+            for x in 0..NUM_LIGHTS_PER_ROW {
+                let idx = z * NUM_LIGHTS_PER_ROW + x;
+
+                let x = SPACE_BETWEEN_LIGHTS * (x as f32 - NUM_LIGHTS_PER_ROW as f32 / 2.0);
+                let z = SPACE_BETWEEN_LIGHTS * (z as f32 - NUM_LIGHTS_PER_ROW as f32 / 2.0);
+
+                let light_position = [x as f32, 5.0, z as f32];
+                let light_color = match (idx as u32) % 3 {
+                    0 => [1.0, 0.0, 0.0],
+                    1 => [0.0, 1.0, 0.0],
+                    _ => [0.0, 0.0, 1.0],
+                };
+                light_manager.update_light_buffer(
+                    &queue,
+                    LightKind::Spot,
+                    (idx as u32) as usize,
+                    &SpotLight::new(light_color, light_position, [0.0, -1.0, 0.0], Deg(45.0), 0.1, 0.1, 0.1),
+                );
+                light_manager.spot_count += 1;
+            }
+        }
+        light_manager.update_light_counts(&queue);
+        // ===========================================================
+
+        // ====================== Create Instances ======================
+        const NUM_INSTANCES_PER_ROW: u32 = 20;
+        const SPACE_BETWEEN: f32 = 2.0;
+        let mut instances = (0..NUM_INSTANCES_PER_ROW)
+            .flat_map(|z| {
+                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+
+                    let position = cgmath::Vector3 { x, y: 0.0, z };
+
+                    //let rotation = if position.is_zero() {
+                    //    cgmath::Quaternion::from_axis_angle(
+                    //        cgmath::Vector3::unit_z(),
+                    //        cgmath::Deg(0.0),
+                    //    )
+                    //} else {
+                    //    cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                    //};
+                    let rotation = cgmath::Quaternion::from_axis_angle(
+                        cgmath::Vector3::unit_z(),
+                        cgmath::Deg(0.0),
+                    );
+
+                    Instance { position, rotation }
+                })
+            })
+            .collect::<Vec<_>>();
+        let instance_data = instances.iter().map(Instance::to_raw).collect_vec();
+        // ==============================================================
+
         // ====================== Create Camera ======================
         let camera = FPSCamera::new(
             (0.0, 10.0, 20.0),
@@ -125,10 +154,6 @@ impl Renderer {
 
         // Create textures
         let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
-
-        // ====================== Create Ligths ======================
-        let scene_light = SceneLights::new(&device);
-        // ===========================================================
 
         // Create buffers
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -222,7 +247,7 @@ impl Renderer {
                 bind_group_layouts: &[
                     &texture_bind_group_layout,
                     &camera_bind_group_layout,
-                    &scene_light.light_bind_group_layout,
+                    &light_manager.light_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -273,7 +298,7 @@ impl Renderer {
             instances,
             camera,
             obj_model,
-            scene_light
+            light_manager,
         };
     }
 
@@ -304,35 +329,6 @@ impl Renderer {
             0,
             bytemuck::cast_slice(&[self.camera.uniform()]),
         );
-
-        // Update lights
-        {
-            let mut directional_light = &mut self.scene_light.directional_lights[0];
-            let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
-            directional_light.direction = q.rotate_vector(directional_light.direction);
-            self.scene_light.update_light_buffer(LightKind::Directional, 0, &self.queue);
-        }
-        {
-            let mut point_light = &mut self.scene_light.point_lights[0];
-            let old_position: cgmath::Vector3<_> = point_light.position.into();
-            point_light.position =
-                (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(1.0))
-                    * old_position)
-                    .into();
-            self.scene_light.update_light_buffer(LightKind::Point, 0, &self.queue);
-        }
-        {
-            let mut spot_light = &mut self.scene_light.spot_lights[0];
-            let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
-            spot_light.direction = q.rotate_vector(spot_light.direction);
-            self.scene_light.update_light_buffer(LightKind::Spot, 0, &self.queue);
-        }
-        {
-            let mut spot_light = &mut self.scene_light.spot_lights[1];
-            let q = cgmath::Quaternion::from_angle_y(Deg(-1.0));
-            spot_light.direction = q.rotate_vector(spot_light.direction);
-            self.scene_light.update_light_buffer(LightKind::Spot, 1, &self.queue);
-        }
     }
 
     pub fn render(&self) -> Result<(), wgpu::SurfaceError> {
@@ -387,7 +383,7 @@ impl Renderer {
                 &self.obj_model,
                 0..self.instances.len() as _,
                 &self.camera_bind_group,
-                &self.scene_light.light_bind_group,
+                &self.light_manager.light_bind_group,
             );
         }
 

@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use cgmath::{Angle, Deg};
+use cgmath::Angle;
 use wgpu::util::DeviceExt;
 
 pub enum LightKind {
@@ -12,8 +12,8 @@ pub enum LightKind {
 
 pub const MAX_AMBIENT_LIGHTS: usize = 1;
 pub const MAX_DIRECTIONAL_LIGHTS: usize = 10;
-pub const MAX_POINT_LIGHTS: usize = 10;
-pub const MAX_SPOT_LIGHTS: usize = 10;
+pub const MAX_POINT_LIGHTS: usize = 256;
+pub const MAX_SPOT_LIGHTS: usize = 256;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Zeroable, bytemuck::Pod)]
 struct LightBuffer {
@@ -36,17 +36,17 @@ impl Default for LightBuffer {
     }
 }
 
-pub struct SceneLights {
-    pub ambient_lights: Vec<BaseLight>,
-    pub directional_lights: Vec<DirectionalLight>,
-    pub point_lights: Vec<PointLight>,
-    pub spot_lights: Vec<SpotLight>,
+pub struct LightBufferManager {
     light_buffer: wgpu::Buffer,
+    pub ambient_count: u32,
+    pub directional_count: u32,
+    pub point_count: u32,
+    pub spot_count: u32,
     pub light_bind_group: wgpu::BindGroup,
     pub light_bind_group_layout: wgpu::BindGroupLayout,
 }
 
-impl SceneLights {
+impl LightBufferManager {
     fn create_buffer(device: &wgpu::Device, label: &str, data: &[u8]) -> wgpu::Buffer {
         return device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(label),
@@ -56,60 +56,8 @@ impl SceneLights {
     }
 
     pub fn new(device: &wgpu::Device) -> Self {
-        let ambient_lights = vec![BaseLight::new([1.0, 1.0, 1.0], 0.0)];
-        let directional_lights = vec![DirectionalLight::new(
-            [1.0, 0.5, 0.0],
-            0.0,
-            [0.0, 0.0, 1.0],
-        )];
-        let point_lights = vec![PointLight::new(
-            [0.0, 1.0, 0.0],
-            [2.0, 2.0, 2.0],
-            1.0,
-            1.0,
-            1.0,
-        )];
-        let spot_lights = vec![
-            SpotLight::new(
-                [1.0, 0.0, 0.0],
-                [6.0, 2.0, 6.0],
-                [1.0, -1.0, 1.0],
-                Deg(40.0),
-                0.5,
-                0.5,
-                0.0,
-            ),
-            SpotLight::new(
-                [0.0, 0.0, 1.0],
-                [6.0, 2.0, 6.0],
-                [-1.0, -1.0, -1.0],
-                Deg(40.0),
-                0.5,
-                0.5,
-                0.0,
-            ),
-        ];
-
-        let mut light_buffer_data = LightBuffer::default();
-        light_buffer_data.uniform_lens = [
-            ambient_lights.len() as _,
-            directional_lights.len() as _,
-            point_lights.len() as _,
-            spot_lights.len() as _,
-        ];
-        for i in 0..ambient_lights.len() {
-            light_buffer_data.ambient_uniforms[i] = ambient_lights[i].uniform();
-        }
-        for i in 0..directional_lights.len() {
-            light_buffer_data.dir_uniforms[i] = directional_lights[i].uniform();
-        }
-        for i in 0..point_lights.len() {
-            light_buffer_data.point_uniforms[i] = point_lights[i].uniform();
-        }
-        for i in 0..spot_lights.len() {
-            light_buffer_data.spot_uniforms[i] = spot_lights[i].uniform();
-        }
-        let light_buffer = SceneLights::create_buffer(
+        let light_buffer_data = LightBuffer::default();
+        let light_buffer = LightBufferManager::create_buffer(
             device,
             "Light Buffer",
             bytemuck::cast_slice(&[light_buffer_data]),
@@ -138,65 +86,68 @@ impl SceneLights {
             label: Some("light_bind_group"),
         });
         Self {
-            ambient_lights,
-            directional_lights,
-            point_lights,
-            spot_lights,
+            ambient_count: 0,
+            directional_count: 0,
+            point_count: 0,
+            spot_count: 0,
             light_buffer,
             light_bind_group,
             light_bind_group_layout,
         }
     }
 
-    fn calculate_buffer_offset(&self, kind: &LightKind, index: usize) -> usize {
-        let mut idx = 0;
-            if matches!(kind, LightKind::Ambient) {
-                idx += size_of::<[f32; 4]>() * index;
-                return idx;
-            } else {
-                idx += size_of::<[f32; 4]>() * MAX_AMBIENT_LIGHTS;
+    const fn calculate_buffer_offset(&self, kind: &LightKind, index: usize) -> usize {
+        return match kind {
+            LightKind::Ambient => size_of::<[f32; 4]>() * index,
+            LightKind::Directional => {
+                size_of::<[[f32; 4]; MAX_AMBIENT_LIGHTS]>()
+                    + size_of::<DirectionalLightUniform>() * index
             }
-            if matches!(kind, LightKind::Directional) {
-                idx += size_of::<DirectionalLightUniform>() * index;
-                return idx;
-            } else {
-                idx += size_of::<DirectionalLightUniform>() * MAX_DIRECTIONAL_LIGHTS;
+            LightKind::Point => {
+                size_of::<[[f32; 4]; MAX_AMBIENT_LIGHTS]>()
+                    + size_of::<[DirectionalLightUniform; MAX_DIRECTIONAL_LIGHTS]>()
+                    + size_of::<PointLightUniform>() * index
             }
-            if matches!(kind, LightKind::Point) {
-                idx += size_of::<PointLightUniform>() * index;
-                return idx;
-            } else {
-                idx += size_of::<PointLightUniform>() * MAX_POINT_LIGHTS;
-            }
-            if matches!(kind, LightKind::Spot) {
-                idx += size_of::<SpotLightUniform>() * index;
-                return idx;
-            } else {
-                idx += size_of::<SpotLightUniform>() * MAX_SPOT_LIGHTS;
-            }
-            return idx;
-    }
-
-    pub fn update_light_buffer(&mut self, kind: LightKind, index: usize, queue: &wgpu::Queue) {
-        let offset = self.calculate_buffer_offset(&kind, index);
-        let data: Vec<u8> = {
-            match kind {
-                LightKind::Ambient => {
-                    bytemuck::cast_slice(&[self.ambient_lights[index].uniform()]).to_vec()
-                }
-                LightKind::Directional => {
-                    bytemuck::cast_slice(&[self.directional_lights[index].uniform()]).to_vec()
-                }
-                LightKind::Point => {
-                    bytemuck::cast_slice(&[self.point_lights[index].uniform()]).to_vec()
-                }
-                LightKind::Spot => {
-                    bytemuck::cast_slice(&[self.spot_lights[index].uniform()]).to_vec()
-                }
+            LightKind::Spot => {
+                size_of::<[[f32; 4]; MAX_AMBIENT_LIGHTS]>()
+                    + size_of::<[DirectionalLightUniform; MAX_DIRECTIONAL_LIGHTS]>()
+                    + size_of::<[PointLightUniform; MAX_POINT_LIGHTS]>()
+                    + size_of::<SpotLightUniform>() * index
             }
         };
-        queue.write_buffer(&self.light_buffer, offset as _, &data);
     }
+
+    pub fn update_light_buffer<L>(
+        &self,
+        queue: &wgpu::Queue,
+        kind: LightKind,
+        index: usize,
+        light: &L,
+    ) where
+        L: Light,
+    {
+        let offset = self.calculate_buffer_offset(&kind, index);
+        queue.write_buffer(&self.light_buffer, offset as _, &light.buffer_data());
+    }
+
+    pub fn update_light_counts(&self, queue: &wgpu::Queue)
+    {
+        let offset: usize = self.calculate_buffer_offset(&LightKind::Spot, MAX_SPOT_LIGHTS);
+        queue.write_buffer(
+            &self.light_buffer,
+            offset as _,
+            bytemuck::cast_slice(&[
+                self.ambient_count,
+                self.directional_count,
+                self.point_count,
+                self.spot_count,
+            ]),
+        );
+    }
+}
+
+pub trait Light {
+    fn buffer_data(&self) -> Vec<u8>;
 }
 
 pub struct BaseLight {
@@ -215,14 +166,20 @@ impl BaseLight {
         }
     }
 
-    pub fn uniform(&self) -> [f32; 4] {
+    fn uniform(&self) -> [f32; 4] {
         return [self.color[0], self.color[1], self.color[2], self.strength];
+    }
+}
+
+impl Light for BaseLight {
+    fn buffer_data(&self) -> Vec<u8> {
+        return bytemuck::cast_slice(&[self.uniform()]).to_vec();
     }
 }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct DirectionalLightUniform {
+struct DirectionalLightUniform {
     base: [f32; 4],
     direction: [f32; 3],
     _padding: u32,
@@ -245,7 +202,7 @@ impl DirectionalLight {
         }
     }
 
-    pub fn uniform(&self) -> DirectionalLightUniform {
+    fn uniform(&self) -> DirectionalLightUniform {
         return DirectionalLightUniform {
             base: self.base.uniform(),
             direction: self.direction.into(),
@@ -254,9 +211,15 @@ impl DirectionalLight {
     }
 }
 
+impl Light for DirectionalLight {
+    fn buffer_data(&self) -> Vec<u8> {
+        return bytemuck::cast_slice(&[self.uniform()]).to_vec();
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct PointLightUniform {
+struct PointLightUniform {
     color: [f32; 3],
     _padding1: u32,
     attenuation: [f32; 3],
@@ -294,7 +257,7 @@ impl PointLight {
         }
     }
 
-    pub fn uniform(&self) -> PointLightUniform {
+    fn uniform(&self) -> PointLightUniform {
         return PointLightUniform {
             color: self.color,
             _padding1: 0,
@@ -310,9 +273,15 @@ impl PointLight {
     }
 }
 
+impl Light for PointLight {
+    fn buffer_data(&self) -> Vec<u8> {
+        return bytemuck::cast_slice(&[self.uniform()]).to_vec();
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct SpotLightUniform {
+struct SpotLightUniform {
     base_uniform: PointLightUniform,
     direction_cutoffcos: [f32; 4],
 }
@@ -346,7 +315,7 @@ impl SpotLight {
         }
     }
 
-    pub fn uniform(&self) -> SpotLightUniform {
+    fn uniform(&self) -> SpotLightUniform {
         return SpotLightUniform {
             base_uniform: self.base.uniform(),
             direction_cutoffcos: [
@@ -356,5 +325,11 @@ impl SpotLight {
                 self.cutoff.cos(),
             ],
         };
+    }
+}
+
+impl Light for SpotLight {
+    fn buffer_data(&self) -> Vec<u8> {
+        return bytemuck::cast_slice(&[self.uniform()]).to_vec();
     }
 }

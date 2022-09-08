@@ -22,8 +22,8 @@ struct SpotLight {
 struct LightBuffer {
     ambients: array<vec4<f32>, 1>,
     dirs: array<DirectionalLight, 10>,
-    points: array<PointLight, 10>,
-    spots: array<SpotLight, 10>,
+    points: array<PointLight, 256>,
+    spots: array<SpotLight, 256>,
     lens: vec4<u32>,
 }
 @group(2) @binding(0)
@@ -155,10 +155,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         input.world_normal
     ));
 
-    let ambient_strength = lights.ambients[0].w;
-    let ambient_color = lights.ambients[0].xyz * ambient_strength;
-
-    var result = ambient_color;
+    var result = vec3<f32>(0.0, 0.0, 0.0);
+    for(var i = 0u; i < lights.lens[0]; i++) {
+        result += lights.ambients[i].xyz * lights.ambients[i].w;
+    }
     for(var i = 0u; i < lights.lens[1]; i++) {
         result += calculate_directional_light_color(lights.dirs[i], object_normal, input, tangent_matrix * (input.world_position.xyz - normalize(lights.dirs[i].direction)));
     }
