@@ -1,23 +1,36 @@
+use std::mem::size_of;
+
 use cgmath::{Angle, Deg};
 use wgpu::util::DeviceExt;
 
+pub enum LightKind {
+    Ambient,
+    Directional,
+    Point,
+    Spot,
+}
+
+pub const MAX_AMBIENT_LIGHTS: usize = 1;
+pub const MAX_DIRECTIONAL_LIGHTS: usize = 10;
+pub const MAX_POINT_LIGHTS: usize = 10;
+pub const MAX_SPOT_LIGHTS: usize = 10;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Zeroable, bytemuck::Pod)]
 struct LightBuffer {
-    pub ambient_uniforms: [[f32; 4]; 1],
-    pub dir_uniforms: [DirectionalLightUniform; 10],
-    pub point_uniforms: [PointLightUniform; 10],
-    pub spot_uniforms: [SpotLightUniform; 10],
+    pub ambient_uniforms: [[f32; 4]; MAX_AMBIENT_LIGHTS],
+    pub dir_uniforms: [DirectionalLightUniform; MAX_DIRECTIONAL_LIGHTS],
+    pub point_uniforms: [PointLightUniform; MAX_POINT_LIGHTS],
+    pub spot_uniforms: [SpotLightUniform; MAX_SPOT_LIGHTS],
     pub uniform_lens: [u32; 4],
 }
 
 impl Default for LightBuffer {
     fn default() -> Self {
         Self {
-            ambient_uniforms: [[0.0; 4]; 1],
-            dir_uniforms: [DirectionalLightUniform::default(); 10],
-            point_uniforms: [PointLightUniform::default(); 10],
-            spot_uniforms: [SpotLightUniform::default(); 10],
+            ambient_uniforms: [[0.0; 4]; MAX_AMBIENT_LIGHTS],
+            dir_uniforms: [DirectionalLightUniform::default(); MAX_DIRECTIONAL_LIGHTS],
+            point_uniforms: [PointLightUniform::default(); MAX_POINT_LIGHTS],
+            spot_uniforms: [SpotLightUniform::default(); MAX_SPOT_LIGHTS],
             uniform_lens: [0; 4],
         }
     }
@@ -43,10 +56,10 @@ impl SceneLights {
     }
 
     pub fn new(device: &wgpu::Device) -> Self {
-        let ambient_lights = vec![BaseLight::new([1.0, 1.0, 1.0], 0.1)];
+        let ambient_lights = vec![BaseLight::new([1.0, 1.0, 1.0], 0.0)];
         let directional_lights = vec![DirectionalLight::new(
             [1.0, 0.5, 0.0],
-            0.05,
+            0.0,
             [0.0, 0.0, 1.0],
         )];
         let point_lights = vec![PointLight::new(
@@ -56,24 +69,26 @@ impl SceneLights {
             1.0,
             1.0,
         )];
-        let spot_lights = vec![SpotLight::new(
-            [1.0, 0.0, 0.0],
-            [6.0, 2.0, 6.0],
-            [1.0, -1.0, 1.0],
-            Deg(40.0),
-            0.5,
-            0.5,
-            0.0,
-        ),
-        SpotLight::new(
-            [0.0, 0.0, 1.0],
-            [6.0, 2.0, 6.0],
-            [-1.0, -1.0, -1.0],
-            Deg(40.0),
-            0.5,
-            0.5,
-            0.0,
-        )];
+        let spot_lights = vec![
+            SpotLight::new(
+                [1.0, 0.0, 0.0],
+                [6.0, 2.0, 6.0],
+                [1.0, -1.0, 1.0],
+                Deg(40.0),
+                0.5,
+                0.5,
+                0.0,
+            ),
+            SpotLight::new(
+                [0.0, 0.0, 1.0],
+                [6.0, 2.0, 6.0],
+                [-1.0, -1.0, -1.0],
+                Deg(40.0),
+                0.5,
+                0.5,
+                0.0,
+            ),
+        ];
 
         let mut light_buffer_data = LightBuffer::default();
         light_buffer_data.uniform_lens = [
@@ -131,6 +146,56 @@ impl SceneLights {
             light_bind_group,
             light_bind_group_layout,
         }
+    }
+
+    fn calculate_buffer_offset(&self, kind: &LightKind, index: usize) -> usize {
+        let mut idx = 0;
+            if matches!(kind, LightKind::Ambient) {
+                idx += size_of::<[f32; 4]>() * index;
+                return idx;
+            } else {
+                idx += size_of::<[f32; 4]>() * MAX_AMBIENT_LIGHTS;
+            }
+            if matches!(kind, LightKind::Directional) {
+                idx += size_of::<DirectionalLightUniform>() * index;
+                return idx;
+            } else {
+                idx += size_of::<DirectionalLightUniform>() * MAX_DIRECTIONAL_LIGHTS;
+            }
+            if matches!(kind, LightKind::Point) {
+                idx += size_of::<PointLightUniform>() * index;
+                return idx;
+            } else {
+                idx += size_of::<PointLightUniform>() * MAX_POINT_LIGHTS;
+            }
+            if matches!(kind, LightKind::Spot) {
+                idx += size_of::<SpotLightUniform>() * index;
+                return idx;
+            } else {
+                idx += size_of::<SpotLightUniform>() * MAX_SPOT_LIGHTS;
+            }
+            return idx;
+    }
+
+    pub fn update_light_buffer(&mut self, kind: LightKind, index: usize, queue: &wgpu::Queue) {
+        let offset = self.calculate_buffer_offset(&kind, index);
+        let data: Vec<u8> = {
+            match kind {
+                LightKind::Ambient => {
+                    bytemuck::cast_slice(&[self.ambient_lights[index].uniform()]).to_vec()
+                }
+                LightKind::Directional => {
+                    bytemuck::cast_slice(&[self.directional_lights[index].uniform()]).to_vec()
+                }
+                LightKind::Point => {
+                    bytemuck::cast_slice(&[self.point_lights[index].uniform()]).to_vec()
+                }
+                LightKind::Spot => {
+                    bytemuck::cast_slice(&[self.spot_lights[index].uniform()]).to_vec()
+                }
+            }
+        };
+        queue.write_buffer(&self.light_buffer, offset as _, &data);
     }
 }
 

@@ -6,7 +6,7 @@ use winit::{event::Event, window::Window};
 use crate::{
     camera::{Camera, FPSCamera, Projection},
     controller::Controller,
-    light::{Attenuation, BaseLight, DirectionalLight, PointLight, SpotLight, SceneLights},
+    light::{SceneLights, LightKind},
     model::{DrawLight, DrawModel, Model},
     resources::{load_model, Instance, InstanceRaw, ModelVertex, Vertex},
     texture::Texture,
@@ -306,36 +306,33 @@ impl Renderer {
         );
 
         // Update lights
-        //{
-        //    let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
-        //    self.directional_light.direction = q.rotate_vector(self.directional_light.direction);
-        //    self.queue.write_buffer(
-        //        &self.directional_light_buffer,
-        //        0,
-        //        bytemuck::cast_slice(&[self.directional_light.uniform()]),
-        //    );
-        //}
-        //{
-        //    let old_position: cgmath::Vector3<_> = self.point_light.position.into();
-        //    self.point_light.position =
-        //        (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(-1.0))
-        //            * old_position)
-        //            .into();
-        //    self.queue.write_buffer(
-        //        &self.point_light_buffer,
-        //        0,
-        //        bytemuck::cast_slice(&[self.point_light.uniform()]),
-        //    );
-        //}
-        //{
-        //    let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
-        //    self.spot_light.direction = q.rotate_vector(self.spot_light.direction);
-        //    self.queue.write_buffer(
-        //        &self.spot_light_buffer,
-        //        0,
-        //        bytemuck::cast_slice(&[self.spot_light.uniform()]),
-        //    );
-        //}
+        {
+            let mut directional_light = &mut self.scene_light.directional_lights[0];
+            let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
+            directional_light.direction = q.rotate_vector(directional_light.direction);
+            self.scene_light.update_light_buffer(LightKind::Directional, 0, &self.queue);
+        }
+        {
+            let mut point_light = &mut self.scene_light.point_lights[0];
+            let old_position: cgmath::Vector3<_> = point_light.position.into();
+            point_light.position =
+                (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(1.0))
+                    * old_position)
+                    .into();
+            self.scene_light.update_light_buffer(LightKind::Point, 0, &self.queue);
+        }
+        {
+            let mut spot_light = &mut self.scene_light.spot_lights[0];
+            let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
+            spot_light.direction = q.rotate_vector(spot_light.direction);
+            self.scene_light.update_light_buffer(LightKind::Spot, 0, &self.queue);
+        }
+        {
+            let mut spot_light = &mut self.scene_light.spot_lights[1];
+            let q = cgmath::Quaternion::from_angle_y(Deg(-1.0));
+            spot_light.direction = q.rotate_vector(spot_light.direction);
+            self.scene_light.update_light_buffer(LightKind::Spot, 1, &self.queue);
+        }
     }
 
     pub fn render(&self) -> Result<(), wgpu::SurfaceError> {
