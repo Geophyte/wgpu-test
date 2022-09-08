@@ -111,9 +111,8 @@ fn calculate_directional_light_color(light: DirectionalLight, input: VertexOutpu
     let diffuse_strength = max(dot(tangent_normal, light_dir), 0.0) * light.color_strength.w;
     let diffuse_color = light.color_strength.xyz * diffuse_strength;
 
-    let specular_strength_mult = 0.1; // !!!
-    let specular_strength = pow(max(dot(tangent_normal, half_dir), 0.0), 32.0);
-    let specular_color = light.color_strength.xyz * specular_strength * specular_strength_mult;
+    let specular_strength = pow(max(dot(tangent_normal, half_dir), 0.0), 32.0) * light.color_strength.w;
+    let specular_color = light.color_strength.xyz * specular_strength;
 
     return diffuse_color + specular_color;
 }

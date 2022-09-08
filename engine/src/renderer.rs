@@ -6,7 +6,7 @@ use winit::{event::Event, window::Window};
 use crate::{
     camera::{Camera, FPSCamera, Projection},
     controller::Controller,
-    light::{AmbientLight, Attenuation, DirectionalLight, PointLight, SpotLight},
+    light::{Attenuation, BaseLight, DirectionalLight, PointLight, SpotLight, SceneLights},
     model::{DrawLight, DrawModel, Model},
     resources::{load_model, Instance, InstanceRaw, ModelVertex, Vertex},
     texture::Texture,
@@ -29,26 +29,18 @@ pub struct Renderer {
 
     instance_buffer: wgpu::Buffer,
     camera_buffer: wgpu::Buffer,
-    ambient_light_buffer: wgpu::Buffer,
-    directional_light_buffer: wgpu::Buffer,
-    point_light_buffer: wgpu::Buffer,
-    spot_light_buffer: wgpu::Buffer,
 
     depth_texture: Texture,
 
     camera_bind_group: wgpu::BindGroup,
-    light_bind_group: wgpu::BindGroup,
 
     render_pipeline: wgpu::RenderPipeline,
-    light_render_pipeline: wgpu::RenderPipeline,
+    //light_render_pipeline: wgpu::RenderPipeline,
     pub size: winit::dpi::PhysicalSize<u32>,
     pub instances: Vec<Instance>,
     pub camera: FPSCamera,
     pub obj_model: Model,
-    pub ambient_light: AmbientLight,
-    pub directional_light: DirectionalLight,
-    pub point_light: PointLight,
-    pub spot_light: SpotLight,
+    pub scene_light: SceneLights
 }
 
 impl Renderer {
@@ -135,37 +127,7 @@ impl Renderer {
         let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
         // ====================== Create Ligths ======================
-        let ambient_light = AmbientLight {
-            color: [1.0, 1.0, 1.0],
-            strength: 0.0,
-        };
-        let directional_light = DirectionalLight {
-            color: [0.0, 0.0, 1.0],
-            strength: 1.0,
-            direction: (0.0, -5.0, 1.0).into(),
-        };
-        let point_light = PointLight {
-            color: [0.0, 1.0, 0.0],
-            attenuation: Attenuation {
-                constant: 1.0,
-                linear: 1.0,
-                exp: 1.0,
-            },
-            position: [2.0, 2.0, 2.0].into(),
-        };
-        let spot_light = SpotLight {
-            base: PointLight {
-                color: [1.0, 0.0, 0.0],
-                attenuation: Attenuation {
-                    constant: 1.0,
-                    linear: 1.0,
-                    exp: 1.0,
-                },
-                position: (3.0, 3.0, 3.0).into(),
-            },
-            direction: (0.0, -1.0, 1.0).into(),
-            cutoff: Deg(20.0).into(),
-        };
+        let scene_light = SceneLights::new(&device);
         // ===========================================================
 
         // Create buffers
@@ -177,27 +139,6 @@ impl Renderer {
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
             contents: bytemuck::cast_slice(&[camera.uniform()]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let ambient_light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Ambient Light Buffer"),
-            contents: bytemuck::cast_slice(&[ambient_light.uniform()]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let directional_light_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Directional Light Buffer"),
-                contents: bytemuck::cast_slice(&[directional_light.uniform()]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-        let point_light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Point Light Buffer"),
-            contents: bytemuck::cast_slice(&[point_light.uniform()]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let spot_light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Spot Light Buffer"),
-            contents: bytemuck::cast_slice(&[spot_light.uniform()]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -264,75 +205,6 @@ impl Renderer {
             label: Some("camera_bind_group"),
         });
 
-        let light_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-                label: Some("light_bind_group_layout"),
-            });
-        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &light_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: ambient_light_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: directional_light_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: point_light_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: spot_light_buffer.as_entire_binding(),
-                },
-            ],
-            label: Some("light_bind_group"),
-        });
-
         // ====================== Create Models ======================
         let obj_model = load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
             .await
@@ -350,7 +222,7 @@ impl Renderer {
                 bind_group_layouts: &[
                     &texture_bind_group_layout,
                     &camera_bind_group_layout,
-                    &light_bind_group_layout,
+                    &scene_light.light_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -365,26 +237,26 @@ impl Renderer {
             )
         };
 
-        let light_render_pipeline = {
-            let shader = wgpu::ShaderModuleDescriptor {
-                label: Some("Light Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("light.wgsl").into()),
-            };
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Light Render Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout, &light_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-            create_render_pipeline(
-                "Light Render Pipeline",
-                &device,
-                &layout,
-                config.format,
-                Some(Texture::DEPTH_FORMAT),
-                &[ModelVertex::desc()],
-                shader,
-            )
-        };
+        //let light_render_pipeline = {
+        //    let shader = wgpu::ShaderModuleDescriptor {
+        //        label: Some("Light Shader"),
+        //        source: wgpu::ShaderSource::Wgsl(include_str!("light.wgsl").into()),
+        //    };
+        //    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        //        label: Some("Light Render Pipeline Layout"),
+        //        bind_group_layouts: &[&camera_bind_group_layout, &scene_light.light_bind_group_layout],
+        //        push_constant_ranges: &[],
+        //    });
+        //    create_render_pipeline(
+        //        "Light Render Pipeline",
+        //        &device,
+        //        &layout,
+        //        config.format,
+        //        Some(Texture::DEPTH_FORMAT),
+        //        &[ModelVertex::desc()],
+        //        shader,
+        //    )
+        //};
 
         return Self {
             surface,
@@ -394,22 +266,14 @@ impl Renderer {
             depth_texture,
             instance_buffer,
             camera_buffer,
-            ambient_light_buffer,
-            directional_light_buffer,
-            point_light_buffer,
-            spot_light_buffer,
             camera_bind_group,
-            light_bind_group,
             render_pipeline,
-            light_render_pipeline,
+            //light_render_pipeline,
             size,
             instances,
             camera,
             obj_model,
-            ambient_light,
-            directional_light,
-            point_light,
-            spot_light,
+            scene_light
         };
     }
 
@@ -442,36 +306,36 @@ impl Renderer {
         );
 
         // Update lights
-        {
-            let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
-            self.directional_light.direction = q.rotate_vector(self.directional_light.direction);
-            self.queue.write_buffer(
-                &self.directional_light_buffer,
-                0,
-                bytemuck::cast_slice(&[self.directional_light.uniform()]),
-            );
-        }
-        {
-            let old_position: cgmath::Vector3<_> = self.point_light.position.into();
-            self.point_light.position =
-                (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(-1.0))
-                    * old_position)
-                    .into();
-            self.queue.write_buffer(
-                &self.point_light_buffer,
-                0,
-                bytemuck::cast_slice(&[self.point_light.uniform()]),
-            );
-        }
-        {
-            let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
-            self.spot_light.direction = q.rotate_vector(self.spot_light.direction);
-            self.queue.write_buffer(
-                &self.spot_light_buffer,
-                0,
-                bytemuck::cast_slice(&[self.spot_light.uniform()]),
-            );
-        }
+        //{
+        //    let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
+        //    self.directional_light.direction = q.rotate_vector(self.directional_light.direction);
+        //    self.queue.write_buffer(
+        //        &self.directional_light_buffer,
+        //        0,
+        //        bytemuck::cast_slice(&[self.directional_light.uniform()]),
+        //    );
+        //}
+        //{
+        //    let old_position: cgmath::Vector3<_> = self.point_light.position.into();
+        //    self.point_light.position =
+        //        (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(-1.0))
+        //            * old_position)
+        //            .into();
+        //    self.queue.write_buffer(
+        //        &self.point_light_buffer,
+        //        0,
+        //        bytemuck::cast_slice(&[self.point_light.uniform()]),
+        //    );
+        //}
+        //{
+        //    let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
+        //    self.spot_light.direction = q.rotate_vector(self.spot_light.direction);
+        //    self.queue.write_buffer(
+        //        &self.spot_light_buffer,
+        //        0,
+        //        bytemuck::cast_slice(&[self.spot_light.uniform()]),
+        //    );
+        //}
     }
 
     pub fn render(&self) -> Result<(), wgpu::SurfaceError> {
@@ -512,12 +376,12 @@ impl Renderer {
             });
 
             // Render light (for debbuging)
-            render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model(
-                &self.obj_model,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            );
+            //render_pass.set_pipeline(&self.light_render_pipeline);
+            //render_pass.draw_light_model(
+            //    &self.obj_model,
+            //    &self.camera_bind_group,
+            //    &self.light_bind_group,
+            //);
 
             // Render models
             render_pass.set_pipeline(&self.render_pipeline);
@@ -526,7 +390,7 @@ impl Renderer {
                 &self.obj_model,
                 0..self.instances.len() as _,
                 &self.camera_bind_group,
-                &self.light_bind_group,
+                &self.scene_light.light_bind_group,
             );
         }
 
