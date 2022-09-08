@@ -8,25 +8,26 @@ var<uniform> camera: Camera;
 // Lights
 struct DirectionalLight {
     color_strength: vec4<f32>,
-    direction: vec3<f32>
+    direction: vec3<f32>,
 };
 struct PointLight {
     color: vec3<f32>,
     attenuation: vec3<f32>,
-    position: vec3<f32>
+    position: vec3<f32>,
 };
 struct SpotLight {
     base: PointLight,
-    direction_ccos: vec4<f32>
+    direction_ccos: vec4<f32>,
+};
+struct LightBuffer {
+    ambients: array<vec4<f32>, 1>,
+    dirs: array<DirectionalLight, 10>,
+    points: array<PointLight, 10>,
+    spots: array<SpotLight, 10>,
+    lens: vec4<u32>,
 }
 @group(2) @binding(0)
-var<uniform> ambient_light: vec4<f32>;
-@group(2) @binding(1)
-var<uniform> directional_light: DirectionalLight;
-@group(2) @binding(2)
-var<uniform> point_light: PointLight;
-@group(2) @binding(3)
-var<uniform> spot_light: SpotLight;
+var<uniform> lights: LightBuffer;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -51,10 +52,10 @@ struct VertexOutput {
     @location(0) tex_coord: vec2<f32>,
     @location(1) tangent_position: vec3<f32>,
     @location(2) tangent_view_position: vec3<f32>,
-    @location(3) tangent_directinal_light_position: vec3<f32>,
-    @location(4) tangent_point_light_position: vec3<f32>,
-    @location(5) tangent_spot_light_position: vec3<f32>,
-    @location(6) tangent_spot_light_direction: vec3<f32>,
+    @location(3) world_position: vec4<f32>,
+    @location(4) world_tangent: vec3<f32>,
+    @location(5) world_bitangent: vec3<f32>,
+    @location(6) world_normal: vec3<f32>,
 };
 
 @vertex
@@ -85,10 +86,10 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
     out.tex_coord = model.tex_coord;
     out.tangent_position = tangent_matrix * world_position.xyz;
     out.tangent_view_position = tangent_matrix * camera.view_pos.xyz;
-    out.tangent_directinal_light_position = tangent_matrix * (world_position.xyz - normalize(directional_light.direction));
-    out.tangent_point_light_position = tangent_matrix * point_light.position;
-    out.tangent_spot_light_position = tangent_matrix * spot_light.base.position;
-    out.tangent_spot_light_direction = normalize(tangent_matrix * spot_light.direction_ccos.xyz);
+    out.world_position = world_position;
+    out.world_tangent = world_tangent;
+    out.world_bitangent = world_bitangent;
+    out.world_normal = world_normal;
     return out;
 }
 
@@ -102,7 +103,7 @@ var t_normal: texture_2d<f32>;
 var s_normal: sampler;
 
 
-fn calculate_directional_light_color(light: DirectionalLight, input: VertexOutput, object_normal: vec4<f32>, tangent_light_position: vec3<f32>) -> vec3<f32> {
+fn calculate_directional_light_color(light: DirectionalLight, object_normal: vec4<f32>, input: VertexOutput, tangent_light_position: vec3<f32>) -> vec3<f32> {
     let tangent_normal = object_normal.xyz * 2.0 - 1.0;
     let light_dir = normalize(tangent_light_position - input.tangent_position);
     let view_dir = normalize(input.tangent_view_position - input.tangent_position);
@@ -117,45 +118,56 @@ fn calculate_directional_light_color(light: DirectionalLight, input: VertexOutpu
     return diffuse_color + specular_color;
 }
 
-fn calculate_point_light_color(light: PointLight, input: VertexOutput, object_normal: vec4<f32>, tangent_light_position: vec3<f32>) -> vec3<f32> {
+fn calculate_point_light_color(light: PointLight, object_normal: vec4<f32>, input: VertexOutput, tangent_light_position: vec3<f32>) -> vec3<f32> {
     var base: DirectionalLight;
     base.color_strength = vec4<f32>(light.color, 1.0);
+    base.direction = vec3<f32>(0.0, 0.0, 0.0);
 
-    let color = calculate_directional_light_color(base, input, object_normal, tangent_light_position);
+    let result = calculate_directional_light_color(base, object_normal, input, tangent_light_position);
 
     let distance = length(tangent_light_position - input.tangent_position);
     let atteniuation = light.attenuation.x + light.attenuation.y * distance + light.attenuation.z * distance * distance;
 
-    return color / atteniuation;
+    return result / atteniuation;
 }
 
-fn calculate_spot_light_color(light: SpotLight, input: VertexOutput, object_normal: vec4<f32>, tangent_light_position: vec3<f32>, tangent_light_direction: vec3<f32>) -> vec3<f32> {
-    let color = calculate_point_light_color(light.base, input, object_normal, tangent_light_position);
+fn calculate_spot_light_color(light: SpotLight, object_normal: vec4<f32>, input: VertexOutput, tangent_light_position: vec3<f32>, tangent_light_direction: vec3<f32>) -> vec3<f32> {
+    let result = calculate_point_light_color(light.base, object_normal, input, tangent_light_position);
 
     let light_to_pixel = normalize(input.tangent_position - tangent_light_position);
     let spot_factor = dot(light_to_pixel, tangent_light_direction);
 
-    var result = vec3<f32>(0.0, 0.0, 0.0);
     if (spot_factor > light.direction_ccos.w) {
         let spot_light_intensity = 1.0 - (1.0 - spot_factor) / (1.0 - light.direction_ccos.w);
-        result = color * spot_light_intensity;
+        return result * spot_light_intensity;
+    } else {
+        return vec3<f32>(0.0, 0.0, 0.0);
     }
-
-    return result;
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, input.tex_coord);
     let object_normal: vec4<f32> = textureSample(t_normal, s_normal, input.tex_coord);
+    let tangent_matrix = transpose(mat3x3<f32>(
+        input.world_tangent,
+        input.world_bitangent,
+        input.world_normal
+    ));
 
-    let ambient_strength = ambient_light.w;
-    let ambient_color = ambient_light.xyz * ambient_strength;
+    let ambient_strength = lights.ambients[0].w;
+    let ambient_color = lights.ambients[0].xyz * ambient_strength;
 
     var result = ambient_color;
-    result += calculate_directional_light_color(directional_light, input, object_normal, input.tangent_directinal_light_position);
-    result += calculate_point_light_color(point_light, input, object_normal, input.tangent_point_light_position);
-    result += calculate_spot_light_color(spot_light, input, object_normal, input.tangent_spot_light_position, input.tangent_spot_light_direction);
+    for(var i = 0u; i < lights.lens[1]; i++) {
+        result += calculate_directional_light_color(lights.dirs[i], object_normal, input, tangent_matrix * (input.world_position.xyz - normalize(lights.dirs[i].direction)));
+    }
+    for(var i = 0u; i < lights.lens[2]; i++) {
+        result += calculate_point_light_color(lights.points[i], object_normal, input, tangent_matrix * lights.points[i].position);
+    }
+    for(var i = 0u; i < lights.lens[3]; i++) {
+        result += calculate_spot_light_color(lights.spots[i], object_normal, input, tangent_matrix * lights.spots[i].base.position, normalize(tangent_matrix * lights.spots[i].direction_ccos.xyz));
+    }
     result *= object_color.xyz;
 
     return vec4<f32>(result, object_color.a);

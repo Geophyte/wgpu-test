@@ -1,15 +1,34 @@
 use cgmath::{Angle, Deg};
 use wgpu::util::DeviceExt;
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Zeroable, bytemuck::Pod)]
+struct LightBuffer {
+    pub ambient_uniforms: [[f32; 4]; 1],
+    pub dir_uniforms: [DirectionalLightUniform; 10],
+    pub point_uniforms: [PointLightUniform; 10],
+    pub spot_uniforms: [SpotLightUniform; 10],
+    pub uniform_lens: [u32; 4],
+}
+
+impl Default for LightBuffer {
+    fn default() -> Self {
+        Self {
+            ambient_uniforms: [[0.0; 4]; 1],
+            dir_uniforms: [DirectionalLightUniform::default(); 10],
+            point_uniforms: [PointLightUniform::default(); 10],
+            spot_uniforms: [SpotLightUniform::default(); 10],
+            uniform_lens: [0; 4],
+        }
+    }
+}
+
 pub struct SceneLights {
-    pub ambient_light: BaseLight,
-    pub directional_light: DirectionalLight,
-    pub point_light: PointLight,
-    pub spot_light: SpotLight,
-    ambient_buffer: wgpu::Buffer,
-    directional_buffer: wgpu::Buffer,
-    point_buffer: wgpu::Buffer,
-    spot_buffer: wgpu::Buffer,
+    pub ambient_lights: Vec<BaseLight>,
+    pub directional_lights: Vec<DirectionalLight>,
+    pub point_lights: Vec<PointLight>,
+    pub spot_lights: Vec<SpotLight>,
+    light_buffer: wgpu::Buffer,
     pub light_bind_group: wgpu::BindGroup,
     pub light_bind_group_layout: wgpu::BindGroupLayout,
 }
@@ -24,119 +43,93 @@ impl SceneLights {
     }
 
     pub fn new(device: &wgpu::Device) -> Self {
-        let ambient_light = BaseLight::new([1.0, 1.0, 1.0], 0.01);
-        let directional_light = DirectionalLight::new([1.0, 0.5, 0.0], 0.05, [0.0, 0.0, 1.0]);
-        let point_light = PointLight::new([0.0, 1.0, 0.0], [2.0, 2.0, 2.0], 1.0, 1.0, 1.0);
-        let spot_light = SpotLight::new(
+        let ambient_lights = vec![BaseLight::new([1.0, 1.0, 1.0], 0.1)];
+        let directional_lights = vec![DirectionalLight::new(
+            [1.0, 0.5, 0.0],
+            0.05,
+            [0.0, 0.0, 1.0],
+        )];
+        let point_lights = vec![PointLight::new(
+            [0.0, 1.0, 0.0],
+            [2.0, 2.0, 2.0],
+            1.0,
+            1.0,
+            1.0,
+        )];
+        let spot_lights = vec![SpotLight::new(
             [1.0, 0.0, 0.0],
             [6.0, 2.0, 6.0],
-            [5.0, -1.0, 5.0],
+            [1.0, -1.0, 1.0],
             Deg(40.0),
             0.5,
             0.5,
             0.0,
-        );
+        ),
+        SpotLight::new(
+            [0.0, 0.0, 1.0],
+            [6.0, 2.0, 6.0],
+            [-1.0, -1.0, -1.0],
+            Deg(40.0),
+            0.5,
+            0.5,
+            0.0,
+        )];
 
-        let ambient_buffer = SceneLights::create_buffer(
+        let mut light_buffer_data = LightBuffer::default();
+        light_buffer_data.uniform_lens = [
+            ambient_lights.len() as _,
+            directional_lights.len() as _,
+            point_lights.len() as _,
+            spot_lights.len() as _,
+        ];
+        for i in 0..ambient_lights.len() {
+            light_buffer_data.ambient_uniforms[i] = ambient_lights[i].uniform();
+        }
+        for i in 0..directional_lights.len() {
+            light_buffer_data.dir_uniforms[i] = directional_lights[i].uniform();
+        }
+        for i in 0..point_lights.len() {
+            light_buffer_data.point_uniforms[i] = point_lights[i].uniform();
+        }
+        for i in 0..spot_lights.len() {
+            light_buffer_data.spot_uniforms[i] = spot_lights[i].uniform();
+        }
+        let light_buffer = SceneLights::create_buffer(
             device,
-            "ambient_buffer",
-            bytemuck::cast_slice(&[ambient_light.uniform()]),
-        );
-        let directional_buffer = SceneLights::create_buffer(
-            device,
-            "directional_buffer",
-            bytemuck::cast_slice(&[directional_light.uniform()]),
-        );
-        let point_buffer = SceneLights::create_buffer(
-            device,
-            "point_buffer",
-            bytemuck::cast_slice(&[point_light.uniform()]),
-        );
-        let spot_buffer = SceneLights::create_buffer(
-            device,
-            "spot_buffer",
-            bytemuck::cast_slice(&[spot_light.uniform()]),
+            "Light Buffer",
+            bytemuck::cast_slice(&[light_buffer_data]),
         );
 
         let light_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
+                    count: None,
+                }],
                 label: Some("light_bind_group_layout"),
             });
         let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &light_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: ambient_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: directional_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: point_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: spot_buffer.as_entire_binding(),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: light_buffer.as_entire_binding(),
+            }],
             label: Some("light_bind_group"),
         });
         Self {
-            ambient_light,
-            directional_light,
-            point_light,
-            spot_light,
-            ambient_buffer,
-            directional_buffer,
-            point_buffer,
-            spot_buffer,
+            ambient_lights,
+            directional_lights,
+            point_lights,
+            spot_lights,
+            light_buffer,
             light_bind_group,
-            light_bind_group_layout
+            light_bind_group_layout,
         }
     }
 }
@@ -163,7 +156,7 @@ impl BaseLight {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DirectionalLightUniform {
     base: [f32; 4],
     direction: [f32; 3],
@@ -197,7 +190,7 @@ impl DirectionalLight {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PointLightUniform {
     color: [f32; 3],
     _padding1: u32,
@@ -253,7 +246,7 @@ impl PointLight {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SpotLightUniform {
     base_uniform: PointLightUniform,
     direction_cutoffcos: [f32; 4],
