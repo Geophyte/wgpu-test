@@ -57,7 +57,7 @@ impl Renderer {
 
         // ====================== Create Instances ======================
         const NUM_INSTANCES_PER_ROW: u32 = 20;
-        const SPACE_BETWEEN: f32 = 1.0;
+        const SPACE_BETWEEN: f32 = 2.0;
         let mut instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
@@ -137,12 +137,12 @@ impl Renderer {
         // ====================== Create Ligths ======================
         let ambient_light = AmbientLight {
             color: [1.0, 1.0, 1.0],
-            strength: 0.1,
+            strength: 0.0,
         };
         let directional_light = DirectionalLight {
             color: [0.0, 0.0, 1.0],
-            strength: 0.1,
-            direction: (0.0, 0.0, 1.0).into(),
+            strength: 1.0,
+            direction: (0.0, -5.0, 1.0).into(),
         };
         let point_light = PointLight {
             color: [0.0, 1.0, 0.0],

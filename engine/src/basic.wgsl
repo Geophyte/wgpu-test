@@ -85,7 +85,7 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
     out.tex_coord = model.tex_coord;
     out.tangent_position = tangent_matrix * world_position.xyz;
     out.tangent_view_position = tangent_matrix * camera.view_pos.xyz;
-    out.tangent_directinal_light_position = tangent_matrix * (normalize(directional_light.direction) + world_position.xyz);
+    out.tangent_directinal_light_position = tangent_matrix * (world_position.xyz - normalize(directional_light.direction));
     out.tangent_point_light_position = tangent_matrix * point_light.position;
     out.tangent_spot_light_position = tangent_matrix * spot_light.base.position;
     out.tangent_spot_light_direction = normalize(tangent_matrix * spot_light.direction_ccos.xyz);
@@ -153,9 +153,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let ambient_strength = ambient_light.w;
     let ambient_color = ambient_light.xyz * ambient_strength;
 
-    //let result = (ambient_color + calculate_directional_light_color(directional_light, input, object_normal) + calculate_point_light_color(point_light, input, object_normal) + calculate_spot_light_color(spot_light, input, object_normal)) * object_color.xyz;
-    let result = calculate_spot_light_color(spot_light, input, object_normal, input.tangent_spot_light_position, input.tangent_spot_light_direction);
-    //let result = calculate_point_light_color(point_light, input, object_normal, input.tangent_point_light_position);
+    var result = ambient_color;
+    result += calculate_directional_light_color(directional_light, input, object_normal, input.tangent_directinal_light_position);
+    result += calculate_point_light_color(point_light, input, object_normal, input.tangent_point_light_position);
+    result += calculate_spot_light_color(spot_light, input, object_normal, input.tangent_spot_light_position, input.tangent_spot_light_direction);
+    result *= object_color.xyz;
 
     return vec4<f32>(result, object_color.a);
 }
