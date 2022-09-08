@@ -6,6 +6,7 @@ use winit::{event::Event, window::Window};
 use crate::{
     camera::{Camera, FPSCamera, Projection},
     controller::Controller,
+    light::{LightBufferManager, LightKind, PointLight, BaseLight, SpotLight},
     model::{DrawLight, DrawModel, Model},
     resources::{load_model, Instance, InstanceRaw, ModelVertex, Vertex},
     texture::Texture,
@@ -28,53 +29,23 @@ pub struct Renderer {
 
     instance_buffer: wgpu::Buffer,
     camera_buffer: wgpu::Buffer,
-    light_buffer: wgpu::Buffer,
 
     depth_texture: Texture,
 
     camera_bind_group: wgpu::BindGroup,
-    light_bind_group: wgpu::BindGroup,
 
     render_pipeline: wgpu::RenderPipeline,
-    light_render_pipeline: wgpu::RenderPipeline,
-
+    //light_render_pipeline: wgpu::RenderPipeline,
     pub size: winit::dpi::PhysicalSize<u32>,
     pub instances: Vec<Instance>,
     pub camera: FPSCamera,
     pub obj_model: Model,
-    pub light_uniform: LightUniform,
+    pub light_manager: LightBufferManager,
 }
 
 impl Renderer {
     pub async fn new(window: &Window) -> Self {
         let size = window.inner_size();
-
-        // ====================== Create Instances ======================
-        const NUM_INSTANCES_PER_ROW: u32 = 10;
-        const SPACE_BETWEEN: f32 = 3.0;
-        let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-
-                    let position = cgmath::Vector3 { x, y: 0.0, z };
-
-                    let rotation = if position.is_zero() {
-                        cgmath::Quaternion::from_axis_angle(
-                            cgmath::Vector3::unit_z(),
-                            cgmath::Deg(0.0),
-                        )
-                    } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    };
-
-                    Instance { position, rotation }
-                })
-            })
-            .collect::<Vec<_>>();
-        let instance_data = instances.iter().map(Instance::to_raw).collect_vec();
-        // ==============================================================
 
         let instance = wgpu::Instance::new(wgpu::Backends::all());
 
@@ -110,6 +81,66 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
+        // ====================== Create lights ======================
+        const NUM_LIGHTS_PER_ROW: u32 = 10;
+        const SPACE_BETWEEN_LIGHTS: f32 = 5.0;
+        let mut light_manager = LightBufferManager::new(&device);
+        for z in 0..NUM_LIGHTS_PER_ROW {
+            for x in 0..NUM_LIGHTS_PER_ROW {
+                let idx = z * NUM_LIGHTS_PER_ROW + x;
+
+                let x = SPACE_BETWEEN_LIGHTS * (x as f32 - NUM_LIGHTS_PER_ROW as f32 / 2.0);
+                let z = SPACE_BETWEEN_LIGHTS * (z as f32 - NUM_LIGHTS_PER_ROW as f32 / 2.0);
+
+                let light_position = [x as f32, 5.0, z as f32];
+                let light_color = match (idx as u32) % 3 {
+                    0 => [1.0, 0.0, 0.0],
+                    1 => [0.0, 1.0, 0.0],
+                    _ => [0.0, 0.0, 1.0],
+                };
+                light_manager.update_light_buffer(
+                    &queue,
+                    LightKind::Spot,
+                    (idx as u32) as usize,
+                    &SpotLight::new(light_color, light_position, [0.0, -1.0, 0.0], Deg(45.0), 0.1, 0.1, 0.1),
+                );
+                light_manager.spot_count += 1;
+            }
+        }
+        light_manager.update_light_counts(&queue);
+        // ===========================================================
+
+        // ====================== Create Instances ======================
+        const NUM_INSTANCES_PER_ROW: u32 = 20;
+        const SPACE_BETWEEN: f32 = 2.0;
+        let mut instances = (0..NUM_INSTANCES_PER_ROW)
+            .flat_map(|z| {
+                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+
+                    let position = cgmath::Vector3 { x, y: 0.0, z };
+
+                    //let rotation = if position.is_zero() {
+                    //    cgmath::Quaternion::from_axis_angle(
+                    //        cgmath::Vector3::unit_z(),
+                    //        cgmath::Deg(0.0),
+                    //    )
+                    //} else {
+                    //    cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                    //};
+                    let rotation = cgmath::Quaternion::from_axis_angle(
+                        cgmath::Vector3::unit_z(),
+                        cgmath::Deg(0.0),
+                    );
+
+                    Instance { position, rotation }
+                })
+            })
+            .collect::<Vec<_>>();
+        let instance_data = instances.iter().map(Instance::to_raw).collect_vec();
+        // ==============================================================
+
         // ====================== Create Camera ======================
         let camera = FPSCamera::new(
             (0.0, 10.0, 20.0),
@@ -124,15 +155,6 @@ impl Renderer {
         // Create textures
         let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
-        // ====================== Create Ligth ======================
-        let light_uniform = LightUniform {
-            position: [2.0, 2.0, 2.0],
-            _padding: 0,
-            color: [1.0, 1.0, 1.0],
-            _padding2: 0,
-        };
-        // ==========================================================
-
         // Create buffers
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
@@ -141,12 +163,7 @@ impl Renderer {
         });
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[camera.view_proj()]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Light Buffer"),
-            contents: bytemuck::cast_slice(&[light_uniform]),
+            contents: bytemuck::cast_slice(&[camera.uniform()]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -213,29 +230,6 @@ impl Renderer {
             label: Some("camera_bind_group"),
         });
 
-        let light_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("light_bind_group_layout"),
-            });
-        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &light_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: light_buffer.as_entire_binding(),
-            }],
-            label: Some("light_bind_group"),
-        });
-
         // ====================== Create Models ======================
         let obj_model = load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
             .await
@@ -253,7 +247,7 @@ impl Renderer {
                 bind_group_layouts: &[
                     &texture_bind_group_layout,
                     &camera_bind_group_layout,
-                    &light_bind_group_layout,
+                    &light_manager.light_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -268,26 +262,26 @@ impl Renderer {
             )
         };
 
-        let light_render_pipeline = {
-            let shader = wgpu::ShaderModuleDescriptor {
-                label: Some("Light Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("light.wgsl").into()),
-            };
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Light Render Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout, &light_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-            create_render_pipeline(
-                "Light Render Pipeline",
-                &device,
-                &layout,
-                config.format,
-                Some(Texture::DEPTH_FORMAT),
-                &[ModelVertex::desc()],
-                shader,
-            )
-        };
+        //let light_render_pipeline = {
+        //    let shader = wgpu::ShaderModuleDescriptor {
+        //        label: Some("Light Shader"),
+        //        source: wgpu::ShaderSource::Wgsl(include_str!("light.wgsl").into()),
+        //    };
+        //    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        //        label: Some("Light Render Pipeline Layout"),
+        //        bind_group_layouts: &[&camera_bind_group_layout, &scene_light.light_bind_group_layout],
+        //        push_constant_ranges: &[],
+        //    });
+        //    create_render_pipeline(
+        //        "Light Render Pipeline",
+        //        &device,
+        //        &layout,
+        //        config.format,
+        //        Some(Texture::DEPTH_FORMAT),
+        //        &[ModelVertex::desc()],
+        //        shader,
+        //    )
+        //};
 
         return Self {
             surface,
@@ -297,16 +291,14 @@ impl Renderer {
             depth_texture,
             instance_buffer,
             camera_buffer,
-            light_buffer,
             camera_bind_group,
-            light_bind_group,
             render_pipeline,
-            light_render_pipeline,
+            //light_render_pipeline,
             size,
             instances,
             camera,
             obj_model,
-            light_uniform,
+            light_manager,
         };
     }
 
@@ -335,19 +327,7 @@ impl Renderer {
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
-            bytemuck::cast_slice(&[self.camera.view_proj()]),
-        );
-
-        // Update light
-        let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
-        self.light_uniform.position =
-            (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(1.0))
-                * old_position)
-                .into();
-        self.queue.write_buffer(
-            &self.light_buffer,
-            0,
-            bytemuck::cast_slice(&[self.light_uniform]),
+            bytemuck::cast_slice(&[self.camera.uniform()]),
         );
     }
 
@@ -389,12 +369,12 @@ impl Renderer {
             });
 
             // Render light (for debbuging)
-            render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model(
-                &self.obj_model,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            );
+            //render_pass.set_pipeline(&self.light_render_pipeline);
+            //render_pass.draw_light_model(
+            //    &self.obj_model,
+            //    &self.camera_bind_group,
+            //    &self.light_bind_group,
+            //);
 
             // Render models
             render_pass.set_pipeline(&self.render_pipeline);
@@ -403,7 +383,7 @@ impl Renderer {
                 &self.obj_model,
                 0..self.instances.len() as _,
                 &self.camera_bind_group,
-                &self.light_bind_group,
+                &self.light_manager.light_bind_group,
             );
         }
 
