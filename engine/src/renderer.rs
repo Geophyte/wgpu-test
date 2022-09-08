@@ -56,8 +56,8 @@ impl Renderer {
         let size = window.inner_size();
 
         // ====================== Create Instances ======================
-        const NUM_INSTANCES_PER_ROW: u32 = 10;
-        const SPACE_BETWEEN: f32 = 3.0;
+        const NUM_INSTANCES_PER_ROW: u32 = 20;
+        const SPACE_BETWEEN: f32 = 1.0;
         let mut instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
@@ -66,14 +66,18 @@ impl Renderer {
 
                     let position = cgmath::Vector3 { x, y: 0.0, z };
 
-                    let rotation = if position.is_zero() {
-                        cgmath::Quaternion::from_axis_angle(
-                            cgmath::Vector3::unit_z(),
-                            cgmath::Deg(0.0),
-                        )
-                    } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    };
+                    //let rotation = if position.is_zero() {
+                    //    cgmath::Quaternion::from_axis_angle(
+                    //        cgmath::Vector3::unit_z(),
+                    //        cgmath::Deg(0.0),
+                    //    )
+                    //} else {
+                    //    cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                    //};
+                    let rotation = cgmath::Quaternion::from_axis_angle(
+                        cgmath::Vector3::unit_z(),
+                        cgmath::Deg(0.0),
+                    );
 
                     Instance { position, rotation }
                 })
@@ -144,8 +148,8 @@ impl Renderer {
             color: [0.0, 1.0, 0.0],
             attenuation: Attenuation {
                 constant: 1.0,
-                linear: 0.0,
-                exp: 0.0,
+                linear: 1.0,
+                exp: 1.0,
             },
             position: [2.0, 2.0, 2.0].into(),
         };
@@ -439,7 +443,7 @@ impl Renderer {
 
         // Update lights
         {
-            let q = cgmath::Quaternion::from_angle_y(Deg(0.1));
+            let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
             self.directional_light.direction = q.rotate_vector(self.directional_light.direction);
             self.queue.write_buffer(
                 &self.directional_light_buffer,
@@ -457,6 +461,15 @@ impl Renderer {
                 &self.point_light_buffer,
                 0,
                 bytemuck::cast_slice(&[self.point_light.uniform()]),
+            );
+        }
+        {
+            let q = cgmath::Quaternion::from_angle_y(Deg(1.0));
+            self.spot_light.direction = q.rotate_vector(self.spot_light.direction);
+            self.queue.write_buffer(
+                &self.spot_light_buffer,
+                0,
+                bytemuck::cast_slice(&[self.spot_light.uniform()]),
             );
         }
     }

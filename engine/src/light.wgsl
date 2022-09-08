@@ -43,8 +43,8 @@ fn vs_main(
 ) -> VertexOutput {
     let scale = 0.25;
     var out: VertexOutput;
-    out.clip_position = camera.view_proj * vec4<f32>(model.position * scale + point_light.position.xyz, 1.0);
-    out.color = point_light.color;
+    out.clip_position = camera.view_proj * vec4<f32>(model.position * scale + spot_light.base.position.xyz, 1.0);
+    out.color = spot_light.base.color;
     return out;
 }
 
