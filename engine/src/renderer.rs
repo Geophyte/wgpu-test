@@ -6,9 +6,8 @@ use winit::{event::Event, window::Window};
 use crate::{
     camera::{Camera, FPSCamera, Projection},
     controller::Controller,
-    light::{LightBufferManager, LightKind, PointLight, BaseLight, SpotLight},
-    model::{DrawLight, DrawModel, Model},
-    resources::{load_model, Instance, InstanceRaw, ModelVertex, Vertex},
+    light::{BaseLight, LightBufferManager, LightKind, PointLight, SpotLight},
+    model::{DrawMesh, Instance, InstanceRaw, Material, Mesh, ModelVertex, Vertex},
     texture::Texture,
 };
 
@@ -39,8 +38,11 @@ pub struct Renderer {
     pub size: winit::dpi::PhysicalSize<u32>,
     pub instances: Vec<Instance>,
     pub camera: FPSCamera,
-    pub obj_model: Model,
-    pub light_manager: LightBufferManager,
+    material: Material,
+    plane_mesh: Mesh,
+    spot_light: SpotLight,
+    point_light: PointLight,
+    light_manager: LightBufferManager,
 }
 
 impl Renderer {
@@ -82,62 +84,70 @@ impl Renderer {
         surface.configure(&device, &config);
 
         // ====================== Create lights ======================
-        const NUM_LIGHTS_PER_ROW: u32 = 10;
-        const SPACE_BETWEEN_LIGHTS: f32 = 5.0;
         let mut light_manager = LightBufferManager::new(&device);
-        for z in 0..NUM_LIGHTS_PER_ROW {
-            for x in 0..NUM_LIGHTS_PER_ROW {
-                let idx = z * NUM_LIGHTS_PER_ROW + x;
-
-                let x = SPACE_BETWEEN_LIGHTS * (x as f32 - NUM_LIGHTS_PER_ROW as f32 / 2.0);
-                let z = SPACE_BETWEEN_LIGHTS * (z as f32 - NUM_LIGHTS_PER_ROW as f32 / 2.0);
-
-                let light_position = [x as f32, 5.0, z as f32];
-                let light_color = match (idx as u32) % 3 {
-                    0 => [1.0, 0.0, 0.0],
-                    1 => [0.0, 1.0, 0.0],
-                    _ => [0.0, 0.0, 1.0],
-                };
-                light_manager.update_light_buffer(
-                    &queue,
-                    LightKind::Spot,
-                    (idx as u32) as usize,
-                    &SpotLight::new(light_color, light_position, [0.0, -1.0, 0.0], Deg(45.0), 0.1, 0.1, 0.1),
-                );
-                light_manager.spot_count += 1;
-            }
-        }
+        light_manager.ambient_count += 1;
+        light_manager.update_light_buffer(
+            &queue,
+            LightKind::Ambient,
+            0,
+            &BaseLight::new([1.0, 1.0, 1.0], 0.01),
+        );
+        let spot_light = SpotLight::new(
+            [1.0, 0.0, 0.0],
+            [2.0, 2.0, 2.0],
+            [1.0, -1.0, 1.0],
+            Deg(30.0),
+            0.5,
+            0.5,
+            0.5,
+        );
+        light_manager.update_light_buffer(&queue, LightKind::Spot, 0, &spot_light);
+        light_manager.spot_count += 1;
+        let point_light = PointLight::new([0.0, 1.0, 1.0], [2.0, 2.0, 2.0], 0.5, 0.5, 0.5);
+        light_manager.update_light_buffer(&queue, LightKind::Point, 0, &point_light);
+        light_manager.point_count += 1;
         light_manager.update_light_counts(&queue);
         // ===========================================================
 
         // ====================== Create Instances ======================
-        const NUM_INSTANCES_PER_ROW: u32 = 20;
-        const SPACE_BETWEEN: f32 = 2.0;
-        let mut instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+        //const NUM_INSTANCES_PER_ROW: u32 = 20;
+        //const SPACE_BETWEEN: f32 = 2.0;
+        //let instances = (0..NUM_INSTANCES_PER_ROW)
+        //    .flat_map(|z| {
+        //        (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+        //            let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+        //            let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
 
-                    let position = cgmath::Vector3 { x, y: 0.0, z };
+        //            let position = cgmath::Vector3 { x, y: 0.0, z };
 
-                    //let rotation = if position.is_zero() {
-                    //    cgmath::Quaternion::from_axis_angle(
-                    //        cgmath::Vector3::unit_z(),
-                    //        cgmath::Deg(0.0),
-                    //    )
-                    //} else {
-                    //    cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    //};
-                    let rotation = cgmath::Quaternion::from_axis_angle(
-                        cgmath::Vector3::unit_z(),
-                        cgmath::Deg(0.0),
-                    );
+        //            //let rotation = if position.is_zero() {
+        //            //    cgmath::Quaternion::from_axis_angle(
+        //            //        cgmath::Vector3::unit_z(),
+        //            //        cgmath::Deg(0.0),
+        //            //    )
+        //            //} else {
+        //            //    cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+        //            //};
+        //            let rotation = cgmath::Quaternion::from_axis_angle(
+        //                cgmath::Vector3::unit_z(),
+        //                cgmath::Deg(0.0),
+        //            );
 
-                    Instance { position, rotation }
-                })
-            })
-            .collect::<Vec<_>>();
+        //            Instance { position, rotation }
+        //        })
+        //    })
+        //    .collect::<Vec<_>>();
+        let instances = vec![Instance {
+            position: cgmath::Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            rotation: cgmath::Quaternion::from_axis_angle(
+                cgmath::Vector3::unit_z(),
+                cgmath::Deg(0.0),
+            ),
+        }];
         let instance_data = instances.iter().map(Instance::to_raw).collect_vec();
         // ==============================================================
 
@@ -230,11 +240,18 @@ impl Renderer {
             label: Some("camera_bind_group"),
         });
 
-        // ====================== Create Models ======================
-        let obj_model = load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
-            .await
-            .unwrap();
-        // ===========================================================
+        // ====================== Create Geometry ======================
+        let material = Material::from_files(
+            "Happy-Tree",
+            &device,
+            &queue,
+            &texture_bind_group_layout,
+            "cube-diffuse.jpg",
+            Some("cube-normal.png")
+        )
+        .await;
+        let plane_mesh = Mesh::plane(&device, 10.0, 10.0, 10, 10);
+        // =============================================================
 
         // Create pipelines
         let render_pipeline = {
@@ -297,7 +314,10 @@ impl Renderer {
             size,
             instances,
             camera,
-            obj_model,
+            material,
+            plane_mesh,
+            spot_light,
+            point_light,
             light_manager,
         };
     }
@@ -329,6 +349,16 @@ impl Renderer {
             0,
             bytemuck::cast_slice(&[self.camera.uniform()]),
         );
+
+        // Update lights
+        self.spot_light.direction =
+            cgmath::Quaternion::from_angle_y(Deg(1.0)).rotate_vector(self.spot_light.direction);
+        self.light_manager
+            .update_light_buffer(&self.queue, LightKind::Spot, 0, &self.spot_light);
+        self.point_light.position =
+            cgmath::Quaternion::from_angle_y(Deg(-1.0)).rotate_point(self.point_light.position);
+        self.light_manager
+            .update_light_buffer(&self.queue, LightKind::Point, 0, &self.point_light);
     }
 
     pub fn render(&self) -> Result<(), wgpu::SurfaceError> {
@@ -379,9 +409,9 @@ impl Renderer {
             // Render models
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.draw_model_instanced(
-                &self.obj_model,
-                0..self.instances.len() as _,
+            render_pass.draw_mesh(
+                &self.plane_mesh,
+                &self.material,
                 &self.camera_bind_group,
                 &self.light_manager.light_bind_group,
             );

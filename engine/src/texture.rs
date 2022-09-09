@@ -58,10 +58,10 @@ impl Texture {
         queue: &wgpu::Queue,
         bytes: &[u8],
         label: &str,
-        is_normal_map: bool,
+        is_diffuse: bool,
     ) -> Result<Self> {
         let img = image::load_from_memory(bytes)?;
-        Self::from_image(device, queue, &img, Some(label), is_normal_map)
+        Self::from_image(device, queue, &img, Some(label), is_diffuse)
     }
 
     pub fn from_image(
@@ -69,7 +69,7 @@ impl Texture {
         queue: &wgpu::Queue,
         img: &image::DynamicImage,
         label: Option<&str>,
-        is_normal_map: bool,
+        is_diffuse: bool,
     ) -> Result<Self> {
         let rgba = img.to_rgba8();
         let dimensions = img.dimensions();
@@ -85,7 +85,7 @@ impl Texture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: if is_normal_map {
+            format: if !is_diffuse {
                 wgpu::TextureFormat::Rgba8Unorm
             } else {
                 wgpu::TextureFormat::Rgba8UnormSrgb

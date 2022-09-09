@@ -237,14 +237,14 @@ pub struct Attenuation {
 pub struct PointLight {
     pub color: [f32; 3],
     pub attenuation: Attenuation,
-    pub position: cgmath::Vector3<f32>,
+    pub position: cgmath::Point3<f32>,
 }
 
 impl PointLight {
     pub fn new<C, P>(color: C, position: P, c_att: f32, l_att: f32, e_att: f32) -> Self
     where
         C: Into<[f32; 3]>,
-        P: Into<cgmath::Vector3<f32>>,
+        P: Into<cgmath::Point3<f32>>,
     {
         Self {
             color: color.into(),
@@ -304,7 +304,7 @@ impl SpotLight {
     ) -> Self
     where
         C: Into<[f32; 3]>,
-        P: Into<cgmath::Vector3<f32>>,
+        P: Into<cgmath::Point3<f32>>,
         D: Into<cgmath::Vector3<f32>>,
         A: Into<cgmath::Rad<f32>>,
     {
