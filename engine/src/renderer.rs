@@ -6,19 +6,11 @@ use winit::{event::Event, window::Window};
 use crate::{
     camera::{Camera, FPSCamera, Projection},
     controller::Controller,
+    geometry::Geometry,
     light::{BaseLight, LightBufferManager, LightKind, PointLight, SpotLight},
     model::{DrawMesh, Instance, InstanceRaw, Material, Mesh, ModelVertex, Vertex},
     texture::Texture,
 };
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct LightUniform {
-    position: [f32; 3],
-    _padding: u32,
-    color: [f32; 3],
-    _padding2: u32,
-}
 
 pub struct Renderer {
     surface: wgpu::Surface,
@@ -34,7 +26,6 @@ pub struct Renderer {
     camera_bind_group: wgpu::BindGroup,
 
     render_pipeline: wgpu::RenderPipeline,
-    //light_render_pipeline: wgpu::RenderPipeline,
     pub size: winit::dpi::PhysicalSize<u32>,
     pub instances: Vec<Instance>,
     pub camera: FPSCamera,
@@ -90,7 +81,7 @@ impl Renderer {
             &queue,
             LightKind::Ambient,
             0,
-            &BaseLight::new([1.0, 1.0, 1.0], 0.01),
+            &BaseLight::new([1.0, 1.0, 1.0], 0.0),
         );
         let spot_light = SpotLight::new(
             [1.0, 0.0, 0.0],
@@ -103,7 +94,7 @@ impl Renderer {
         );
         light_manager.update_light_buffer(&queue, LightKind::Spot, 0, &spot_light);
         light_manager.spot_count += 1;
-        let point_light = PointLight::new([0.0, 1.0, 1.0], [2.0, 2.0, 2.0], 0.5, 0.5, 0.5);
+        let point_light = PointLight::new([0.0, 1.0, 1.0], [2.0, 2.0, 2.0], 1000.0, 1000.0, 1000.0);
         light_manager.update_light_buffer(&queue, LightKind::Point, 0, &point_light);
         light_manager.point_count += 1;
         light_manager.update_light_counts(&queue);
@@ -246,11 +237,14 @@ impl Renderer {
             &device,
             &queue,
             &texture_bind_group_layout,
-            "cube-diffuse.jpg",
-            Some("cube-normal.png")
+            "happy-tree.png",
+            Some("cube-normal.png"),
         )
         .await;
-        let plane_mesh = Mesh::plane(&device, 10.0, 10.0, 10, 10);
+        //let plane_geometry = Geometry::plane(10.0, 10.0, 10, 10);
+        let mut plane_geometry = Geometry::cube(2.0, 2.0, 2.0);
+        plane_geometry.transpose(cgmath::Vector3::new(0.0, -1.0, 0.0));
+        let plane_mesh = Mesh::from_geometry(&device, &plane_geometry);
         // =============================================================
 
         // Create pipelines
@@ -279,27 +273,6 @@ impl Renderer {
             )
         };
 
-        //let light_render_pipeline = {
-        //    let shader = wgpu::ShaderModuleDescriptor {
-        //        label: Some("Light Shader"),
-        //        source: wgpu::ShaderSource::Wgsl(include_str!("light.wgsl").into()),
-        //    };
-        //    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        //        label: Some("Light Render Pipeline Layout"),
-        //        bind_group_layouts: &[&camera_bind_group_layout, &scene_light.light_bind_group_layout],
-        //        push_constant_ranges: &[],
-        //    });
-        //    create_render_pipeline(
-        //        "Light Render Pipeline",
-        //        &device,
-        //        &layout,
-        //        config.format,
-        //        Some(Texture::DEPTH_FORMAT),
-        //        &[ModelVertex::desc()],
-        //        shader,
-        //    )
-        //};
-
         return Self {
             surface,
             config,
@@ -310,7 +283,6 @@ impl Renderer {
             camera_buffer,
             camera_bind_group,
             render_pipeline,
-            //light_render_pipeline,
             size,
             instances,
             camera,
@@ -397,14 +369,6 @@ impl Renderer {
                     stencil_ops: None,
                 }),
             });
-
-            // Render light (for debbuging)
-            //render_pass.set_pipeline(&self.light_render_pipeline);
-            //render_pass.draw_light_model(
-            //    &self.obj_model,
-            //    &self.camera_bind_group,
-            //    &self.light_bind_group,
-            //);
 
             // Render models
             render_pass.set_pipeline(&self.render_pipeline);

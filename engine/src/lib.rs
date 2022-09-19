@@ -5,6 +5,7 @@ mod resources;
 mod texture;
 mod model;
 pub mod light;
+pub mod geometry;
 
 use controller::{Controller, ControllerEvent};
 use renderer::Renderer;

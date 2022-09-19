@@ -1,11 +1,10 @@
 use std::ops::Range;
 
-use cgmath::InnerSpace;
 use image::{ImageBuffer, Rgba};
 use itertools::Itertools;
 use wgpu::util::DeviceExt;
 
-use crate::{resources::load_texture, texture::Texture};
+use crate::{resources::load_texture, texture::Texture, geometry::Geometry};
 
 pub struct Mesh {
     pub vertex_buffer: wgpu::Buffer,
@@ -14,134 +13,22 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub fn plane(device: &wgpu::Device, width: f32, height: f32, rows: u32, columns: u32) -> Self {
-        let quad_width = width / columns as f32;
-        let quad_height = height / rows as f32;
-
-        let start_x = -width / 2.0;
-        let start_z = -height / 2.0;
-        let mut vertices = (0..=rows)
-            .flat_map(|r| {
-                (0..=columns).map(move |c| {
-                    let position = [
-                        start_x + c as f32 * quad_width,
-                        0.0,
-                        start_z + r as f32 * quad_height,
-                    ];
-                    let tex_coords = [
-                        (-position[0] / start_x + 1.0) / 2.0,
-                        (-position[2] / start_z + 1.0) / 2.0,
-                    ];
-                    let normal = [0.0, 1.0, 0.0];
-                    let tangent = [0.0; 3];
-                    let bitangent = [0.0; 3];
-
-                    ModelVertex {
-                        position,
-                        tex_coords,
-                        normal,
-                        tangent,
-                        bitangent,
-                    }
-                })
-            })
-            .collect_vec();
-        let indices = (0..rows)
-            .flat_map(|r| {
-                let row_len = columns + 1;
-                (0..columns).flat_map(move |c| {
-                    [
-                        r * row_len + c,
-                        (r + 1) * row_len + c,
-                        (r + 1) * row_len + c + 1,
-                        r * row_len + c,
-                        (r + 1) * row_len + c + 1,
-                        r * row_len + c + 1,
-                    ]
-                })
-            })
-            .collect_vec();
-
-        Mesh::calculate_tangents_bitangents(&mut vertices, &indices);
-
+    pub fn from_geometry(device: &wgpu::Device, geometry: &Geometry) -> Self {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Plane Vertex Buffer"),
-            contents: bytemuck::cast_slice(&vertices),
+            contents: bytemuck::cast_slice(&geometry.vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Plane Index Buffer"),
-            contents: bytemuck::cast_slice(&indices),
+            contents: bytemuck::cast_slice(&geometry.indices),
             usage: wgpu::BufferUsages::INDEX,
         });
 
         Self {
             vertex_buffer,
             index_buffer,
-            index_count: indices.len() as u32,
-        }
-    }
-
-    fn calculate_tangents_bitangents(vertices: &mut Vec<ModelVertex>, indices: &Vec<u32>) {
-        let mut triangles_included = vec![0; vertices.len()];
-
-        for c in indices.chunks(3) {
-            let v0 = vertices[c[0] as usize];
-            let v1 = vertices[c[1] as usize];
-            let v2 = vertices[c[2] as usize];
-
-            let pos0: cgmath::Vector3<_> = v0.position.into();
-            let pos1: cgmath::Vector3<_> = v1.position.into();
-            let pos2: cgmath::Vector3<_> = v2.position.into();
-
-            let uv0: cgmath::Vector2<_> = v0.tex_coords.into();
-            let uv1: cgmath::Vector2<_> = v1.tex_coords.into();
-            let uv2: cgmath::Vector2<_> = v2.tex_coords.into();
-
-            // Calculate the edges of the triangle
-            let delta_pos1 = pos1 - pos0;
-            let delta_pos2 = pos2 - pos0;
-
-            let delta_uv1 = uv1 - uv0;
-            let delta_uv2 = uv2 - uv0;
-
-            // Solving the following system of equations will
-            // give us the tangent and bitangent.
-            //     delta_pos1 = delta_uv1.x * T + delta_u.y * B
-            //     delta_pos2 = delta_uv2.x * T + delta_uv2.y * B
-            let r = 1.0 / (delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x);
-            let tangent = (delta_pos1 * delta_uv2.y - delta_pos2 * delta_uv1.y) * r;
-
-            // Flip the bitangent to enable right-handed normal
-            // maps with wgpu texture coordinate system
-            let bitangent = (delta_pos2 * delta_uv1.x - delta_pos1 * delta_uv2.x) * -r;
-
-            // Use the same tangent/bitangent for each vertex in the triangle
-            vertices[c[0] as usize].tangent =
-                (tangent + cgmath::Vector3::from(vertices[c[0] as usize].tangent)).into();
-            vertices[c[1] as usize].tangent =
-                (tangent + cgmath::Vector3::from(vertices[c[1] as usize].tangent)).into();
-            vertices[c[2] as usize].tangent =
-                (tangent + cgmath::Vector3::from(vertices[c[2] as usize].tangent)).into();
-
-            vertices[c[0] as usize].bitangent =
-                (bitangent + cgmath::Vector3::from(vertices[c[0] as usize].bitangent)).into();
-            vertices[c[1] as usize].bitangent =
-                (bitangent + cgmath::Vector3::from(vertices[c[1] as usize].bitangent)).into();
-            vertices[c[2] as usize].bitangent =
-                (bitangent + cgmath::Vector3::from(vertices[c[2] as usize].bitangent)).into();
-
-            // Used to average the tangents/bitangents
-            triangles_included[c[0] as usize] += 1;
-            triangles_included[c[1] as usize] += 1;
-            triangles_included[c[2] as usize] += 1;
-        }
-        // Average the tangents/bitangents
-        for (i, n) in triangles_included.into_iter().enumerate() {
-            let denom = 1.0 / n as f32;
-            let mut v = &mut vertices[i];
-            v.tangent = (cgmath::Vector3::from(v.tangent) * denom).into();
-            v.bitangent = (cgmath::Vector3::from(v.bitangent) * denom).into();
+            index_count: geometry.indices.len() as u32,
         }
     }
 }
@@ -184,9 +71,7 @@ impl Material {
                 device,
                 queue,
             ),
-            Some(file) => load_texture(file, false, device, queue)
-                .await
-                .unwrap(),
+            Some(file) => load_texture(file, false, device, queue).await.unwrap(),
         };
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
